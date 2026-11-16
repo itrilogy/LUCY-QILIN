@@ -24,6 +24,11 @@ from store.views import (
 )
 
 
+def _fts_query(text: str) -> str:
+    """FTS5 短语查询：整体加引号，内部引号翻倍，避免被当成语法。"""
+    return '"' + text.replace('"', '""') + '"'
+
+
 def _like(text: str) -> str:
     """把用户输入转成 LIKE 模式，转义 % 与 _，避免把查询当成通配符。"""
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -186,14 +191,22 @@ class CatalogMixin:
         if platform:
             clauses.append("(platforms LIKE ? OR platforms LIKE '%,any,%')")
             params.append(f"%,{platform},%")
-        needle = query.strip().lower()
+        needle = query.strip()
         if needle:
-            pattern = _like(needle)
-            clauses.append(
-                "(lower(package_id) LIKE ? ESCAPE '\\' OR lower(title) LIKE ? ESCAPE '\\'"
-                " OR lower(summary) LIKE ? ESCAPE '\\' OR lower(description) LIKE ? ESCAPE '\\')"
-            )
-            params.extend([pattern] * 4)
+            pattern = _like(needle.lower())
+            if self._fts_ready and len(needle) >= 3:
+                # trigram 最少 3 个字符；id 仍走 LIKE，正文走 FTS。
+                clauses.append(
+                    "(lower(package_id) LIKE ? ESCAPE '\\'"
+                    " OR package_id IN (SELECT package_id FROM catalog_fts WHERE catalog_fts MATCH ?))"
+                )
+                params.extend([pattern, _fts_query(needle)])
+            else:
+                clauses.append(
+                    "(lower(package_id) LIKE ? ESCAPE '\\' OR lower(title) LIKE ? ESCAPE '\\'"
+                    " OR lower(summary) LIKE ? ESCAPE '\\' OR lower(description) LIKE ? ESCAPE '\\')"
+                )
+                params.extend([pattern] * 4)
         where = " AND ".join(clauses)
         total = self._db.execute(
             "SELECT COUNT(*) FROM catalog_index WHERE " + where, tuple(params)
@@ -210,6 +223,8 @@ class CatalogMixin:
     def _rebuild_catalog_index(self) -> None:
         """启动时按已发布版本重建索引。数据量小，正确性优先。"""
         self._db.execute("DELETE FROM catalog_index")
+        if self._fts_ready:
+            self._db.execute("DELETE FROM catalog_fts")
         rows = self._db.execute(
             "SELECT DISTINCT package_id FROM releases WHERE unpublished_at IS NULL"
         ).fetchall()
@@ -225,6 +240,8 @@ class CatalogMixin:
         ).fetchall()
         if not rows:
             self._db.execute("DELETE FROM catalog_index WHERE package_id = ?", (package_id,))
+            if self._fts_ready:
+                self._db.execute("DELETE FROM catalog_fts WHERE package_id = ?", (package_id,))
             return
         best = max(rows, key=cmp_to_key(lambda left, right: _cmp(left["version"], right["version"])))
         manifest = json.loads(best["manifest_json"])
@@ -261,6 +278,17 @@ class CatalogMixin:
                 best["manifest_json"],
             ),
         )
+        if self._fts_ready:
+            self._db.execute("DELETE FROM catalog_fts WHERE package_id = ?", (package_id,))
+            self._db.execute(
+                "INSERT INTO catalog_fts (package_id, title, summary, description) VALUES (?, ?, ?, ?)",
+                (
+                    package_id,
+                    str(manifest.get("title") or ""),
+                    str(manifest.get("summary") or ""),
+                    str(manifest.get("description") or ""),
+                ),
+            )
 
     def list_reviews(self, token: str) -> list[dict]:
         with self._read():

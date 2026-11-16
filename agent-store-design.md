@@ -657,6 +657,7 @@ v1 一个进程、一个 SQLite、一个本地制品目录。不要先上数据�
 - `release_platforms`：package_id、version、platform、artifact_path、sha256、submission_id、published_at。主键 `(package_id, version, platform)`。已有主键不可更新（`PLATFORM_TAKEN` / `VERSION_IMMUTABLE`）
 - `package_owners`：namespace、publisher_id、created_at、updated_at。主键 `namespace`。首个在该前缀下发布商品的发布者成为所有者；admin 可转移。启动时按已发布提交回填。
 - `catalog_index`：package_id 主键、version、kind、title、summary、description、clients、platforms、manifest_json、updated_at。每个包只放最新可见版本；发布与下架时增量维护，启动时重建。`search` 走这张表，不再解析全部清单。
+- `catalog_fts`：FTS5 trigram 虚表（package_id、title、summary、description），与 `catalog_index` 同步维护。3 个字符以上的查询走 `MATCH`，短词回退 `LIKE`；SQLite 没编 FTS5 时整体回退 `LIKE`。
 - `client_caps`：client_id、caps（JSON 数组）
 - `audit`：actor、action、package_id、version、channel、at。只写不改；admin 用 `list_audit` 读，按 id 倒序，可按包与动作过滤
 

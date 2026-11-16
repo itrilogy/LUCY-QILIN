@@ -177,6 +177,7 @@ class StoreBase:
             );
             """
         )
+        self._fts_ready = self._enable_fts()
         self._db.executescript(
             """
             CREATE INDEX IF NOT EXISTS releases_visible ON releases (unpublished_at, package_id);
@@ -214,6 +215,17 @@ class StoreBase:
             "UPDATE accounts SET nickname = display_name WHERE nickname = '' AND display_name != ''"
         )
         self._db.commit()
+    def _enable_fts(self) -> bool:
+        """建 FTS5 trigram 表。SQLite 没编 FTS5 时返回 False，搜索回退 LIKE。"""
+        try:
+            self._db.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS catalog_fts USING fts5("
+                "package_id UNINDEXED, title, summary, description, tokenize='trigram')"
+            )
+            return True
+        except sqlite3.OperationalError:
+            return False
+
     def _cached_key_principal(self, key: str) -> Principal | None:
         cache_key = _hash(key)
         now = time.time()
