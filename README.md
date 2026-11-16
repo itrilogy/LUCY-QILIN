@@ -28,6 +28,23 @@ http://127.0.0.1:8787/
 PYTHONPATH=. python3 -m store.cli serve --port 8788
 ```
 
+## MCP 接入
+
+商店起来后，MCP 地址是 `http://127.0.0.1:8787/mcp`。匿名可以看货架、读全部规范；上传与审核要在门户里登录并持有 KEY。通用配置：
+
+```json
+{
+  "mcpServers": {
+    "qilin": {
+      "type": "http",
+      "url": "http://127.0.0.1:8787/mcp"
+    }
+  }
+}
+```
+
+DSH 可以直接装 [`integrations/qilin-mcp`](integrations/qilin-mcp) 这个配置式 bundle，装完新开会话会出现 `mcp__qilin__*` 工具。
+
 ## 本机试用
 
 1. 打开门户，注册第一个账号。库里还没有账号时，这个账号是管理员；之后注册的是发布者。
