@@ -1,0 +1,311 @@
+{
+  "version": "kv/1",
+  "status": "draft",
+  "updated": "2026-11-16",
+  "title": "栖林知识包受控词表",
+  "description": "知识包 business_category / business_domain / knowledge_kind / security_level 的封闭取值。词表一旦发布，增删改都要升 version；知识包在清单里用 knowledge.vocabulary 固定自己依据的版本。",
+  "sources": [
+    "Obsidian 笔记库 8691 篇的题头、标签与目录统计（2026-11-16）",
+    ".reasonix/memory/global 企业背景与部门文件（仅 company-*、dept-*、MEMORY.md）",
+    "KNOWLEDGE-DECOMPOSER 技能的目录、题头、链接与图谱约定",
+    "作者的知识工作画像：烟草行业信息化、创新与 QC、学术论文、内容生产、AI 工程、人文与决策阅读"
+  ],
+  "rules": {
+    "category_segments": "business_category / business_domain / knowledge_kind 三段都必须在词表内",
+    "unknown_value": "不在词表内的取值按 KNOWLEDGE_TAXONOMY 拒绝，不做模糊匹配",
+    "deprecated": "status=deprecated 的取值不再接受新包，已发布的包仍可读",
+    "tree_path": "<business_category>/<business_domain>/<knowledge_kind>/<id>/<version>",
+    "tag_vocabulary": "见 knowledge-tags.json",
+    "metadata_vocabulary": "见 knowledge-metadata.json"
+  },
+  "categories": [
+    {
+      "id": "policy-compliance",
+      "name": "制度与合规",
+      "definition": "规则与依据的权威来源：行业政策、内部规章、预算财经口径、审计整改、合法性审查与普法。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments", "five-year-plan"],
+      "legacy_tags": ["制度", "体系文件", "合规", "预算", "审计", "普法宣传"],
+      "domains": [
+        { "id": "industry-policy", "name": "行业政策", "definition": "国家局、省局及地方政策文件与解读。" },
+        { "id": "internal-rule", "name": "内部规章", "definition": "本单位制度、办法、细则与体系文件。" },
+        { "id": "budget-finance", "name": "预算财经", "definition": "预算编制、资金管理、财务口径与核算。" },
+        { "id": "audit-rectify", "name": "审计整改", "definition": "内审、专项检查、问题清单与整改台账。" },
+        { "id": "legal-review", "name": "合法性审查", "definition": "合同、规范性文件与重大决策的合法性审查。" },
+        { "id": "legal-popularization", "name": "普法宣传", "definition": "法治宣传、以案释法与合规培训素材。" }
+      ]
+    },
+    {
+      "id": "monopoly-enforcement",
+      "name": "专卖执法",
+      "definition": "许可证管理与稽查执法：市场检查、案件查办、内部专卖监督、边界市场治理。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments"],
+      "legacy_tags": ["专卖监管", "打假打私", "许可证", "案件"],
+      "domains": [
+        { "id": "license-admin", "name": "许可证管理", "definition": "零售许可的受理、核查、变更与退出。" },
+        { "id": "case-handling", "name": "案件查办", "definition": "立案、调查取证、裁量与案卷归档。" },
+        { "id": "market-supervision", "name": "市场监管", "definition": "日常检查、专项行动与市场净化。" },
+        { "id": "internal-supervision", "name": "内部专卖监督", "definition": "对内违规经营、真烟非法流通的监督。" },
+        { "id": "border-market", "name": "边界市场", "definition": "省际毗邻市场的价格、渠道与情报。" }
+      ]
+    },
+    {
+      "id": "marketing-brand",
+      "name": "营销与品牌",
+      "definition": "从需求预测到零售终端的分销知识：货源投放、品牌培育、客户服务与满意度。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments"],
+      "legacy_tags": ["客户经营", "品牌培育", "终端", "满意度"],
+      "domains": [
+        { "id": "demand-forecast", "name": "需求预测", "definition": "销量预测、市场状态与投放节奏。" },
+        { "id": "supply-allocation", "name": "货源投放", "definition": "货源组织、投放策略与库存周转。" },
+        { "id": "brand-cultivation", "name": "品牌培育", "definition": "重点品牌、新品导入与结构提升。" },
+        { "id": "terminal-customer", "name": "终端与客户", "definition": "现代终端建设、客户分类与服务标准。" },
+        { "id": "satisfaction", "name": "满意度", "definition": "零售户与消费者满意度调查及改进。" }
+      ]
+    },
+    {
+      "id": "supply-production",
+      "name": "供应链与生产",
+      "definition": "实体流转与产地协同：仓储分拣、配送、工商网配、烟叶复烤、精益成本。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments"],
+      "legacy_tags": ["物流", "配送", "烟叶", "精益物流"],
+      "domains": [
+        { "id": "warehousing", "name": "仓储分拣", "definition": "入库、储位、分拣线与盘点。" },
+        { "id": "distribution", "name": "配送线路", "definition": "线路规划、送货服务与成本。" },
+        { "id": "industrial-online", "name": "工商网配", "definition": "工商网上配货、产销衔接与库存协同。" },
+        { "id": "leaf-production", "name": "烟叶与复烤", "definition": "收购、复烤、基地单元与质量品控。" },
+        { "id": "lean-cost", "name": "精益成本", "definition": "作业标准、损耗控制与降本改善。" }
+      ]
+    },
+    {
+      "id": "digital-tech",
+      "name": "数字化与技术",
+      "definition": "企业侧的系统、网络、数据与智能应用：运维、安全、治理、AI 应用与基础设施。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments", "Harness", "skills", "copilot"],
+      "legacy_tags": ["数字化转型", "网信安全管理", "数据治理", "等保"],
+      "domains": [
+        { "id": "system-ops", "name": "系统运维", "definition": "应用系统、变更、监控与故障处置。" },
+        { "id": "cyber-security", "name": "网络安全与等保", "definition": "等级保护、攻防演练、终端与账号安全。" },
+        { "id": "data-governance", "name": "数据治理", "definition": "数据标准、分级分类、质量与共享。" },
+        { "id": "ai-application", "name": "AI 应用", "definition": "企业场景中的模型、知识库与智能体落地。" },
+        { "id": "infrastructure", "name": "基础设施", "definition": "网络、算力、存储与云资源。" }
+      ]
+    },
+    {
+      "id": "innovation-project",
+      "name": "创新与项目",
+      "definition": "有生命周期的创新活动：立项、验收、知识产权、实验室与工作室、QC 改善。",
+      "scope": "enterprise",
+      "legacy_folders": ["projects/tech-innovation", "projects/incubation-engineering", "departments/innovation-center"],
+      "legacy_tags": ["科技创新", "QC", "软著", "工作室", "立项"],
+      "domains": [
+        { "id": "project-lifecycle", "name": "立项与验收", "definition": "申报、立项、中期、验收与结题。" },
+        { "id": "ip-patent", "name": "软著与专利", "definition": "软件著作权、专利与成果登记。" },
+        { "id": "lab-studio", "name": "实验室与工作室", "definition": "创新平台、命名工作室与运行机制。" },
+        { "id": "qc-improvement", "name": "QC 与改善", "definition": "QC 课题、精益改善与合理化建议。" },
+        { "id": "transfer", "name": "成果转化", "definition": "从成果到业务应用的推广与复制。" }
+      ]
+    },
+    {
+      "id": "org-hr-training",
+      "name": "组织人力与培训",
+      "definition": "岗位、能力与组织建设：岗位手册、培训课程、考核积分、安全生产与综合行政。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments", "projects/education-training"],
+      "legacy_tags": ["培训", "岗位", "安全", "综合管理"],
+      "domains": [
+        { "id": "position-manual", "name": "岗位手册", "definition": "岗位职责、任职条件与工作标准。" },
+        { "id": "training-course", "name": "培训课程", "definition": "课程、课件、考试与培训档案。" },
+        { "id": "performance", "name": "考核与积分", "definition": "绩效指标、积分制与评价结果。" },
+        { "id": "safety", "name": "安全生产", "definition": "安全责任、隐患排查与应急预案。" },
+        { "id": "general-admin", "name": "综合行政", "definition": "会议、接待、公文流转与后勤保障。" }
+      ]
+    },
+    {
+      "id": "party-social",
+      "name": "党建与社会责任",
+      "definition": "党建引领下的社会责任实践：党建廉政、便民服务、志愿服务、乡村振兴与产业融合。",
+      "scope": "enterprise",
+      "legacy_folders": ["departments"],
+      "legacy_tags": ["党建引领", "便民服务", "志愿服务", "乡村振兴", "产业融合", "三色协同机制"],
+      "domains": [
+        { "id": "party-building", "name": "党建廉政", "definition": "党建活动、廉政教育与监督执纪。" },
+        { "id": "convenience-service", "name": "便民服务", "definition": "面向零售户与群众的便民举措。" },
+        { "id": "volunteer", "name": "志愿服务", "definition": "志愿活动、公益项目与队伍管理。" },
+        { "id": "rural-revitalization", "name": "乡村振兴", "definition": "驻村帮扶、产业帮扶与乡村共建。" },
+        { "id": "industry-integration", "name": "产业融合", "definition": "烟草与文旅、农业等产业的协同。" }
+      ]
+    },
+    {
+      "id": "case-data",
+      "name": "案例与数据",
+      "definition": "可复用的经验与指标：执法案例、项目复盘、经营指标、外部情报。",
+      "scope": "enterprise",
+      "legacy_folders": ["archives", "Clippings"],
+      "legacy_tags": ["案例", "复盘", "指标", "情报"],
+      "domains": [
+        { "id": "enforcement-case", "name": "执法案例", "definition": "案件事实、处置过程与裁量结果。" },
+        { "id": "project-review", "name": "项目复盘", "definition": "目标、过程、偏差与改进。" },
+        { "id": "business-metrics", "name": "经营指标", "definition": "指标口径、月报、同比环比与看板。" },
+        { "id": "external-intel", "name": "外部情报", "definition": "行业动态、控烟履约与竞品信息。" }
+      ]
+    },
+    {
+      "id": "standards-lean",
+      "name": "标准化与精益",
+      "definition": "标准与改进方法：国家/行业/企业标准、精益管理、六西格玛。",
+      "scope": "enterprise",
+      "legacy_folders": ["projects/standardization", "projects/lean-management"],
+      "legacy_tags": ["标准化", "精益", "六西格玛", "标准"],
+      "domains": [
+        { "id": "national-standard", "name": "国家标准", "definition": "GB、GB/T 等国家标准的采用与解读。" },
+        { "id": "industry-standard", "name": "行业标准", "definition": "行业标准与团体标准的对照。" },
+        { "id": "enterprise-spec", "name": "企业标准", "definition": "企业标准、作业指导书与规范。" },
+        { "id": "lean", "name": "精益管理", "definition": "价值流、5S、看板与持续改善。" },
+        { "id": "six-sigma", "name": "六西格玛", "definition": "DMAIC、统计工具与项目辅导。" }
+      ]
+    },
+    {
+      "id": "research",
+      "name": "科研与论文",
+      "definition": "学术产出：期刊与会议论文、课题申报、专利、审稿与返修。",
+      "scope": "work",
+      "legacy_folders": ["projects/academic-papers", "personal-profile/Kwangwah's Paper"],
+      "legacy_tags": ["论文", "学术", "投稿", "返修"],
+      "domains": [
+        { "id": "journal", "name": "期刊论文", "definition": "选题、写作、投稿与录用。" },
+        { "id": "conference", "name": "会议论文", "definition": "会议投稿、报告与论文集。" },
+        { "id": "proposal", "name": "课题申报", "definition": "基金、课题与项目申报书。" },
+        { "id": "patent", "name": "专利", "definition": "专利撰写、答复与授权。" },
+        { "id": "revision", "name": "审稿与返修", "definition": "审稿意见、修改说明与返修稿。" }
+      ]
+    },
+    {
+      "id": "content",
+      "name": "内容生产与传播",
+      "definition": "面向读者的表达：文章、公众号、新闻稿、访谈演讲、网摘。",
+      "scope": "work",
+      "legacy_folders": ["content-production", "TALKSHOW"],
+      "legacy_tags": ["公众号", "文章", "新闻", "网摘"],
+      "domains": [
+        { "id": "article", "name": "文章", "definition": "评论、随笔与专栏文章。" },
+        { "id": "wechat", "name": "公众号", "definition": "公众号选题、成稿与配图。" },
+        { "id": "news", "name": "新闻稿", "definition": "消息、通讯与活动报道。" },
+        { "id": "talkshow", "name": "访谈与演讲", "definition": "访谈提纲、演讲稿与口播稿。" },
+        { "id": "clipping", "name": "网摘", "definition": "外部文章摘录与批注。" }
+      ]
+    },
+    {
+      "id": "humanities",
+      "name": "人文与思想",
+      "definition": "对人的处境与观念的理解：哲学、历史、文学、伦理与宗教。",
+      "scope": "work",
+      "legacy_folders": ["Clippings/人文哲思"],
+      "legacy_tags": ["哲学", "历史", "文学", "伦理"],
+      "domains": [
+        { "id": "philosophy", "name": "哲学", "definition": "认识论、伦理学、政治哲学与思想史。" },
+        { "id": "history", "name": "历史", "definition": "事件、制度与人物，重因果与语境。" },
+        { "id": "literature", "name": "文学", "definition": "作品、文体与叙事手法。" },
+        { "id": "ethics", "name": "伦理", "definition": "技术伦理、职业伦理与公共道德。" },
+        { "id": "religion", "name": "宗教", "definition": "宗教传统、仪式与观念比较。" }
+      ]
+    },
+    {
+      "id": "decision",
+      "name": "决策与财经",
+      "definition": "面对不确定性的判断：经济、投资、心理、风险与商业分析。",
+      "scope": "work",
+      "legacy_folders": ["Clippings/投资理财与决策"],
+      "legacy_tags": ["投资", "经济", "决策", "风险"],
+      "domains": [
+        { "id": "economics", "name": "经济", "definition": "宏观、产业与制度经济学。" },
+        { "id": "investing", "name": "投资", "definition": "资产配置、估值与组合管理。" },
+        { "id": "psychology", "name": "心理", "definition": "认知偏差、行为决策与情绪。" },
+        { "id": "risk", "name": "风险", "definition": "风险识别、概率思维与安全边际。" },
+        { "id": "business-analysis", "name": "商业分析", "definition": "行业结构、竞争与商业模式。" }
+      ]
+    },
+    {
+      "id": "learning",
+      "name": "学习与教育",
+      "definition": "人怎么学会：学习科学、教学设计、认知、评估与课程。",
+      "scope": "work",
+      "legacy_folders": ["Clippings/学习科学与方法论", "projects/education-training"],
+      "legacy_tags": ["学习科学", "教学", "认知", "课程"],
+      "domains": [
+        { "id": "learning-science", "name": "学习科学", "definition": "记忆、迁移、间隔与刻意练习。" },
+        { "id": "teaching-design", "name": "教学设计", "definition": "目标、活动、脚手架与反馈。" },
+        { "id": "cognition", "name": "认知", "definition": "注意、工作记忆、元认知与认知负荷。" },
+        { "id": "assessment", "name": "评估", "definition": "形成性评价、量规与考试设计。" },
+        { "id": "curriculum", "name": "课程", "definition": "课程体系、学分与培养方案。" }
+      ]
+    },
+    {
+      "id": "language",
+      "name": "语言与写作",
+      "definition": "语言本身：写作、翻译、语言学、修辞与术语。",
+      "scope": "work",
+      "legacy_folders": ["Clippings/语言与工程"],
+      "legacy_tags": ["写作", "翻译", "语言学", "修辞"],
+      "domains": [
+        { "id": "writing", "name": "写作", "definition": "结构、论证、文体与修改。" },
+        { "id": "translation", "name": "翻译", "definition": "英汉互译、术语一致性与风格。" },
+        { "id": "linguistics", "name": "语言学", "definition": "语法、语义、语用与语言演化。" },
+        { "id": "rhetoric", "name": "修辞", "definition": "说服、叙事与表达策略。" },
+        { "id": "terminology", "name": "术语", "definition": "术语标准化、缩写与译名。" }
+      ]
+    },
+    {
+      "id": "ai",
+      "name": "人工智能与智能体",
+      "definition": "技术侧的 AI：智能体工程、提示词、检索增强、模型运维、AI 认知与工具。",
+      "scope": "work",
+      "legacy_folders": ["Harness", "skills", "copilot", "Clippings/AI-Agent工程", "Clippings/AI认知与哲学"],
+      "legacy_tags": ["AI", "LLM", "Agent", "MCP", "提示词", "RAG"],
+      "domains": [
+        { "id": "agent-engineering", "name": "智能体工程", "definition": "工具调用、编排、记忆与多智能体。" },
+        { "id": "prompt-engineering", "name": "提示词工程", "definition": "指令设计、上下文组织与评测。" },
+        { "id": "retrieval-rag", "name": "检索增强", "definition": "切分、索引、召回、重排与引用。" },
+        { "id": "model-ops", "name": "模型运维", "definition": "部署、推理优化、微调与成本。" },
+        { "id": "ai-cognition", "name": "AI 认知", "definition": "能力边界、可解释性与人机协作。" },
+        { "id": "ai-tooling", "name": "AI 工具", "definition": "DSH、Claude Code、Codex、MCP 等工具链。" }
+      ]
+    },
+    {
+      "id": "knowledge-ops",
+      "name": "知识运营",
+      "definition": "知识库自身的方法与工具：知识地图、方法论、模板工具、术语表、智能体技能。",
+      "scope": "work",
+      "legacy_folders": ["_grok_knowledge_map", "templates", "skills"],
+      "legacy_tags": ["MOC", "方法论", "模板", "术语"],
+      "domains": [
+        { "id": "moc", "name": "知识地图", "definition": "导航篇、主题簇与阅读路径。" },
+        { "id": "method", "name": "方法论", "definition": "分类法、写作法、复盘法与研究方法。" },
+        { "id": "tooling", "name": "工具与模板", "definition": "模板、脚本、插件与操作手册。" },
+        { "id": "glossary", "name": "术语表", "definition": "术语、缩写与口径的统一解释。" },
+        { "id": "agent-skill", "name": "智能体技能", "definition": "技能包、提示词与工具编排说明。" }
+      ]
+    }
+  ],
+  "kinds": [
+    { "id": "reference", "name": "参考", "definition": "可直接查阅的事实、定义、条款或清单。", "note_type": "reference_note" },
+    { "id": "guide", "name": "指南", "definition": "怎么做一件事的步骤、判断与注意事项。", "note_type": "guide_note" },
+    { "id": "tutorial", "name": "教程", "definition": "带示例、可跟着做的完整教学过程。", "note_type": "tutorial_note" },
+    { "id": "reflection", "name": "反思", "definition": "对一次经历或判断的复盘与再认识。", "note_type": "reflection_note" },
+    { "id": "moc", "name": "导航", "definition": "主题地图、阅读路径与篇目索引。", "note_type": "map_of_content" }
+  ],
+  "security_levels": [
+    { "id": "public", "name": "公开", "definition": "可以对外分享，不含内部信息。" },
+    { "id": "internal", "name": "内部", "definition": "默认级别，本单位人员可见。" },
+    { "id": "restricted", "name": "受限", "definition": "限部门或岗位可见，含内部经营数据。" },
+    { "id": "confidential", "name": "机密", "definition": "限指定人员，含敏感案件、个人或商业信息。" }
+  ],
+  "scopes": [
+    { "id": "enterprise", "name": "企业", "definition": "企业内部知识，默认不进公开货架。" },
+    { "id": "work", "name": "工作产出", "definition": "个人或团队的知识工作产出，可按密级决定是否公开。" }
+  ]
+}

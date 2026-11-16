@@ -1,0 +1,2074 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-product="qilin" data-theme="dark" data-density="comfortable">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>栖林 · 智能体集市</title>
+  <link rel="stylesheet" href="/design/tokens.css" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg-page);
+      color: var(--text-primary);
+      font-family: "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    :focus-visible { outline: 2px solid var(--color-accent, var(--luxi-cyan)); outline-offset: 2px; }
+    .app { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
+    .top {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px;
+      background: var(--bg-sunken);
+      border-bottom: 1px solid var(--border-line);
+    }
+    .marks { display: flex; gap: 8px; align-items: center; }
+    .marks img { width: 32px; height: 32px; display: block; }
+    .brand-name { font-size: 17px; line-height: 1.4; margin: 0; }
+    .slogan { margin: 0; color: var(--text-muted); font-size: 12px; letter-spacing: 0.18em; }
+    .top-spacer { flex: 1; }
+    .who { font-size: 12px; color: var(--text-muted); }
+    .key {
+      width: 180px; height: 32px; padding: 0 8px;
+      background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 4px;
+    }
+    .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+    .nav {
+      background: var(--bg-card);
+      border-right: 1px solid var(--border-line);
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .nav button {
+      height: 36px; text-align: left; padding: 0 12px;
+      border: 1px solid transparent; border-radius: 6px;
+      background: transparent; color: var(--text-secondary, var(--text-primary));
+    }
+    .nav button[aria-current="page"] {
+      background: var(--bg-raised);
+      border-color: var(--border-strong);
+    }
+    .main { overflow: auto; padding: 24px; }
+    h1 { font-size: 28px; line-height: 1.25; letter-spacing: -0.02em; margin: 0 0 8px; }
+    h2 { font-size: 22px; line-height: 1.3; margin: 0 0 12px; }
+    .lead { color: var(--text-muted); margin: 0 0 20px; max-width: 62ch; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .identity { display: flex; align-items: center; gap: 8px; }
+    .identity label { margin: 0; }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-line);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .goods {
+      display: flex; flex-direction: column; gap: 8px;
+      min-height: 196px;
+      border-top: 2px solid var(--color-primary);
+    }
+    .goods h3 { font-size: 18px; line-height: 1.35; margin: 0; }
+    .summary {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    .prose {
+      max-width: 68ch;
+      margin: 0 0 8px;
+      font-size: 16px;
+      line-height: 1.75;
+    }
+    .sku {
+      margin: 0;
+      font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .meta { margin: 0; color: var(--text-secondary, var(--text-primary)); font-size: 13px; line-height: 1.5; }
+    .account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+    .kv dd { white-space: pre-line; line-height: 1.6; }
+    .goods .row { margin-top: auto; }
+    .market { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 16px; }
+    .market input { width: min(420px, 100%); }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chips button {
+      height: 32px; padding: 0 12px; border-radius: 999px;
+      border: 1px solid var(--border-line);
+      background: transparent;
+      color: var(--text-primary);
+    }
+    .chips button[aria-pressed="true"] {
+      background: var(--color-primary);
+      color: var(--origin-white);
+      border-color: transparent;
+    }
+    .count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag {
+      font-size: 12px; line-height: 1.45;
+      padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--border-line);
+      color: var(--text-secondary, var(--text-primary));
+    }
+    .tag.gold { background: var(--product-accent-2); color: #121A17; border-color: transparent; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      height: 36px; padding: 0 16px; border-radius: 6px;
+      border: 1px solid var(--border-line); background: transparent;
+    }
+    .btn.primary { background: var(--color-primary); color: var(--origin-white); border-color: transparent; }
+    .btn.primary:hover { background: var(--color-primary-hover); }
+    .btn.danger { color: var(--text-danger); border-color: var(--text-danger); }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .split { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
+    .list-btn {
+      width: 100%; text-align: left; padding: 12px;
+      border-radius: 10px; border: 1px solid var(--border-line);
+      background: var(--bg-card); margin-bottom: 8px;
+    }
+    .list-btn[aria-pressed="true"] { border-color: var(--border-strong); background: var(--bg-raised); }
+    label { display: block; font-size: 12px; color: var(--text-primary); margin: 12px 0 4px; }
+    label .name {
+      margin-left: 6px;
+      color: var(--text-muted);
+      font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+      font-weight: 400;
+    }
+    .req, .opt { font-style: normal; margin-left: 6px; font-size: 12px; }
+    .req { color: var(--text-danger); }
+    .opt { color: var(--text-muted); }
+    input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--text-danger); }
+    .checks { list-style: none; margin: 8px 0 0; padding: 0; }
+    .checks li { font-size: 12px; line-height: 1.7; color: var(--text-muted); }
+    .checks li.met { color: var(--text-primary); }
+    .checks li.unmet { color: var(--text-danger); }
+    input, select, textarea {
+      width: 100%; height: 36px; padding: 0 12px;
+      background: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px;
+    }
+    input[type="checkbox"], input[type="file"] { width: auto; height: auto; padding: 0; background: transparent; }
+    #key { width: 220px; height: 32px; }
+    textarea { height: auto; min-height: 88px; padding: 8px 12px; resize: vertical; }
+    .narrow { max-width: 280px; }
+    .choices { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+    .choice { min-width: 180px; }
+    .choice label { margin: 0 0 4px; }
+    .row { margin-top: 12px; }
+    .field-error { color: var(--text-danger); font-size: 12px; margin: 4px 0 0; }
+    .group {
+      background: var(--bg-card); border: 1px solid var(--border-line);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+    }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 8px 12px; font-size: 13px; }
+    .kv dt { color: var(--text-muted); }
+    .kv dd { margin: 0; overflow-wrap: anywhere; }
+    .rule {
+      background: var(--bg-sunken); border-left: 3px solid var(--text-danger);
+      padding: 8px 12px; margin: 8px 0;
+      font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; font-size: 12px;
+    }
+    .diff {
+      font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+      font-size: 12px; white-space: pre-wrap;
+      background: var(--bg-sunken); padding: 12px; border-radius: 6px;
+    }
+    .view { display: none; }
+    .view.on { display: block; }
+    .foot { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+    .state { color: var(--text-muted); margin: 12px 0; }
+    .state.error { color: var(--text-danger); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+    th { color: var(--text-muted); font-weight: 500; }
+    dialog {
+      width: min(640px, calc(100% - 32px));
+      background: var(--bg-card); color: var(--text-primary);
+      border: 1px solid var(--border-line); border-radius: 10px; padding: 16px;
+    }
+    #login-box { width: min(400px, calc(100% - 32px)); }
+    dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+    .hidden { display: none; }
+    .top { position: sticky; top: 0; z-index: 2; backdrop-filter: blur(8px); }
+    .card:hover { border-color: var(--border-strong); }
+    .file-pick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+    .file-pick input[type="file"] {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+    }
+    .diff-view {
+      font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+      font-size: 12px; white-space: pre-wrap;
+      background: var(--bg-sunken); padding: 12px; border-radius: 6px;
+      margin: 8px 0 0;
+    }
+    .diff-add { color: var(--luxi-green); }
+    .diff-del { color: var(--text-danger); }
+    .diff-hunk { color: var(--text-muted); }
+    .file-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="marks">
+        <img src="/design/qilin.svg" alt="栖林" />
+        <img src="/design/luxi-lab-gold.svg" alt="鹿溪联合创新实验室" />
+      </div>
+      <div>
+        <h1 class="brand-name">栖林</h1>
+        <p class="slogan">百智栖林，成荫润木</p>
+      </div>
+      <div class="top-spacer"></div>
+      <button type="button" class="btn" id="theme">浅色</button>
+      <button type="button" class="btn" id="login-open">登录</button>
+      <button type="button" class="btn hidden" id="hub-login">实验室账号登录</button>
+      <span class="who" id="who">未登录</span>
+      <button type="button" class="btn hidden" id="logout">退出</button>
+    </header>
+    <div class="shell">
+      <nav class="nav" aria-label="栖林">
+        <button type="button" data-view="shelf" aria-current="page">货架</button>
+        <button type="button" data-view="runtime">运行时</button>
+        <button type="button" data-view="mine">我的提交</button>
+        <button type="button" data-view="review">审核</button>
+        <button type="button" data-view="audit" id="nav-audit" class="hidden">审计</button>
+        <button type="button" data-view="users">用户</button>
+        <button type="button" data-view="admin-users">用户管理</button>
+        <button type="button" data-view="connect">连接</button>
+      </nav>
+      <main class="main">
+        <section id="shelf" class="view on" data-kind="">
+          <div class="row">
+            <h1>货架</h1>
+            <div class="top-spacer"></div>
+            <button type="button" class="btn" id="new-product">上架新产品</button>
+          </div>
+          <p class="lead" id="identity-hint">货架只陈列已经发布的技能、MCP 和知识包。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。</p>
+          <p class="foot" id="identity-note">本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。</p>
+          <div class="market">
+            <input id="query" placeholder="搜名称、一句话或产品 id" aria-label="搜索货架" />
+            <button type="button" class="btn" id="search">搜索</button>
+            <div class="chips" id="kind-chips" role="group" aria-label="货架分类">
+              <button type="button" data-kind="" aria-pressed="true">全部</button>
+              <button type="button" data-kind="skill" aria-pressed="false">技能</button>
+              <button type="button" data-kind="mcp" aria-pressed="false">MCP</button>
+              <button type="button" data-kind="mcp+skill" aria-pressed="false">技能与 MCP</button>
+              <button type="button" data-kind="knowledge" aria-pressed="false">知识包</button>
+            </div>
+            <span class="count" id="shelf-count"></span>
+          </div>
+          <p class="state" id="shelf-state">正在读取货架。</p>
+          <div class="grid" id="shelf-grid"></div>
+        </section>
+
+        <section id="runtime" class="view" data-kind="runtime">
+          <h1>运行时</h1>
+          <p class="lead">运行时、依赖工具只在本菜单陈列，不进入货架。同一个版本可以补一个平台的文件，不能替换已经发布的文件。</p>
+          <p class="state" id="runtime-state">正在读取运行时。</p>
+          <div class="grid" id="runtime-grid"></div>
+        </section>
+
+        <section id="detail" class="view">
+          <button type="button" class="btn" id="back-shelf">返回</button>
+          <h1 id="detail-title" style="margin-top:16px"></h1>
+          <p class="lead" id="detail-lead"></p>
+          <p class="prose" id="detail-prose"></p>
+          <div class="group">
+            <h2>版本</h2>
+            <table>
+              <thead><tr><th>版本</th><th>变更</th><th>适用平台</th><th>AI 工具</th></tr></thead>
+              <tbody id="version-rows"></tbody>
+            </table>
+            <p class="foot" id="plan-note">上表为作者声明的适用平台。下方选择本机平台，只用于生成安装说明，不改产品本身。页面下载须先登录。</p>
+            <div class="choices">
+              <div class="choice">
+                <label for="plan-version">选定版本</label>
+                <select id="plan-version"></select>
+              </div>
+              <div class="choice">
+                <label for="plan-client">AI 工具</label>
+                <select id="plan-client"></select>
+              </div>
+              <div class="choice">
+                <label for="plan-platform">装到这台电脑</label>
+                <select id="plan-platform"></select>
+              </div>
+            </div>
+            <div class="row">
+              <button type="button" class="btn primary" id="show-plan">安装说明</button>
+              <button type="button" class="btn" id="new-version">上架新版本</button>
+              <button type="button" class="btn hidden" id="add-platform">追加平台</button>
+            </div>
+          </div>
+          <div id="detail-sheet"></div>
+        </section>
+
+        <section id="users" class="view">
+          <div id="users-out">
+          <h1 id="create-title">注册</h1>
+          <p class="lead">本菜单只办理注册。登录请使用顶栏登录框，填写用户名和口令，不从名单中选择。</p>
+          <div class="group" id="create-panel">
+              <p class="foot" id="create-hint">第一位是审核，之后是作者。标了必填的都要填。口令按下面的规则。创建后到「连接」复制商店 MCP 的配置。</p>
+              <label for="reg-username">用户名 <abbr class="req">必填</abbr></label>
+              <input id="reg-username" autocomplete="username" placeholder="小写字母开头" aria-required="true" />
+              <label for="reg-real-name">姓名 <abbr class="req">必填</abbr></label>
+              <input id="reg-real-name" autocomplete="name" aria-required="true" />
+              <label for="reg-nickname">昵称 <abbr class="req">必填</abbr></label>
+              <input id="reg-nickname" autocomplete="nickname" aria-required="true" />
+              <label for="reg-department">部门 <abbr class="opt">选填</abbr></label>
+              <input id="reg-department" autocomplete="organization" />
+              <label for="reg-title">岗位 <abbr class="opt">选填</abbr></label>
+              <input id="reg-title" autocomplete="organization-title" />
+              <label for="reg-password">口令 <abbr class="req">必填</abbr></label>
+              <input id="reg-password" type="password" autocomplete="new-password" aria-required="true" />
+              <ul class="checks" id="password-checks" aria-live="polite">
+                <li data-rule="len">10 到 64 位</li>
+                <li data-rule="lower">含小写字母</li>
+                <li data-rule="upper">含大写字母</li>
+                <li data-rule="digit">含数字</li>
+                <li data-rule="user">不包含用户名</li>
+              </ul>
+              <label for="reg-password-again">再输入一次口令 <abbr class="req">必填</abbr></label>
+              <input id="reg-password-again" type="password" autocomplete="new-password" aria-required="true" />
+              <div class="row">
+                <button type="button" class="btn primary" id="reg-submit">创建</button>
+                <button type="button" class="btn" id="users-login">已有账号，登录</button>
+              </div>
+              <p class="state" id="reg-state"></p>
+            </div>
+          </div>
+          <div id="profile-panel" class="hidden">
+          <h1>我的资料</h1>
+          <p class="lead">本菜单只修改本人的资料和口令。注册、登录和用户管理不在本菜单。</p>
+          <div class="group">
+            <h2>我的资料</h2>
+            <p class="foot">用户名不能改。昵称出现在货架和顶栏。改口令不影响商店 MCP 的 KEY。</p>
+            <label for="profile-username">用户名</label>
+            <input id="profile-username" disabled />
+            <label for="profile-real-name">姓名 <abbr class="req">必填</abbr></label>
+            <input id="profile-real-name" autocomplete="name" aria-required="true" />
+            <label for="profile-nickname">昵称 <abbr class="req">必填</abbr></label>
+            <input id="profile-nickname" autocomplete="nickname" aria-required="true" />
+            <label for="profile-department">部门 <abbr class="opt">选填</abbr></label>
+            <input id="profile-department" autocomplete="organization" />
+            <label for="profile-title">岗位 <abbr class="opt">选填</abbr></label>
+            <input id="profile-title" autocomplete="organization-title" />
+            <div class="row"><button type="button" class="btn" id="save-profile">保存资料</button></div>
+            <p class="state" id="profile-state"></p>
+          </div>
+          <div class="group">
+            <h2>修改口令</h2>
+            <label for="old-password">原来的口令 <abbr class="req">必填</abbr></label>
+            <input id="old-password" type="password" autocomplete="current-password" aria-required="true" />
+            <label for="new-password">新口令 <abbr class="req">必填</abbr></label>
+            <input id="new-password" type="password" autocomplete="new-password" aria-required="true" />
+            <ul class="checks" id="new-password-checks" aria-live="polite">
+              <li data-rule="len">10 到 64 位</li>
+              <li data-rule="lower">含小写字母</li>
+              <li data-rule="upper">含大写字母</li>
+              <li data-rule="digit">含数字</li>
+              <li data-rule="user">不包含用户名</li>
+            </ul>
+            <label for="new-password-again">再输入一次新口令 <abbr class="req">必填</abbr></label>
+            <input id="new-password-again" type="password" autocomplete="new-password" aria-required="true" />
+            <div class="row"><button type="button" class="btn" id="change-password">修改口令</button></div>
+            <p class="state" id="password-state"></p>
+          </div>
+          </div>
+        </section>
+
+        <section id="admin-users" class="view">
+          <h1>用户管理</h1>
+          <p class="lead">审核可在本菜单修改角色、停用账号，并为他人重置口令。新口令由商店随机生成，只显示一次。不能重置自己的口令，也不能查看原口令或 KEY。</p>
+          <p class="state" id="admin-gate">先用审核的口令登录。</p>
+          <div class="group hidden" id="admin-board">
+            <div class="group hidden" id="reset-once">
+              <h2>新口令</h2>
+              <p class="foot" id="reset-note"></p>
+              <pre id="reset-secret" class="diff"></pre>
+              <div class="row"><button type="button" class="btn" id="copy-reset">复制口令</button></div>
+              <p class="state" id="reset-copy-state"></p>
+            </div>
+            <table>
+              <thead><tr><th>昵称</th><th>姓名</th><th>部门</th><th>岗位</th><th>用户名</th><th>角色</th><th></th></tr></thead>
+              <tbody id="manage-rows"></tbody>
+            </table>
+            <p class="state" id="manage-state"></p>
+            <div class="group" id="namespace-board">
+              <h2>命名空间</h2>
+              <p class="foot">把某个前缀（id 第一个点之前，例如 luxi）转给另一个作者。只改所有者记录，不改写历史提交与审计。</p>
+              <label for="namespace-name">命名空间</label>
+              <input id="namespace-name" placeholder="luxi" />
+              <label for="namespace-owner">接收者</label>
+              <select id="namespace-owner"></select>
+              <div class="row">
+                <button type="button" class="btn" id="namespace-transfer">转移</button>
+              </div>
+              <p class="state" id="namespace-state"></p>
+            </div>
+          </div>
+        </section>
+
+        <section id="connect" class="view">
+          <h1>连接</h1>
+          <p class="lead">在 AI 工具中连接本商店的 MCP 服务后，方可浏览、下载和使用已发布产品。上架规范由该 MCP 的 get_spec 下发，不写在技能正文里。使用说明以本页配置为准。</p>
+          <p class="state" id="connect-anon">先登录。创建账号时会生成那把 KEY，并带到这一页。</p>
+          <div class="group hidden" id="connect-secret">
+            <h2>这一把 KEY</h2>
+            <p class="foot">只出现这一次。离开之后明文不再显示。作者的 KEY 和审核的 KEY 不要装进同一个 AI 工具。</p>
+            <pre id="connect-key" class="diff"></pre>
+            <h2>交给 AI 工具</h2>
+            <p class="foot">商店 MCP。把整段配置贴进 AI 工具的 MCP 设置。交目录前先让工具调用 get_spec。钥匙放进环境变量 QILIN_STORE_KEY，不要写进命令，也不要写进笔记。</p>
+            <pre id="connect-snippet" class="diff"></pre>
+            <div class="row"><button type="button" class="btn primary" id="copy-snippet">复制配置</button></div>
+            <p class="state" id="copy-state"></p>
+          </div>
+          <div class="group hidden" id="connect-later">
+            <h2>已经生成</h2>
+            <p class="foot" id="connect-later-note">这把 KEY 已经生成。明文只在创建或重新生成时出现一次。重新生成会作废原来的那一把，仍然只有一把。交目录前先调用 get_spec。钥匙放进环境变量 QILIN_STORE_KEY，不要写进命令，也不要写进笔记。</p>
+            <p class="sku" id="connect-url"></p>
+            <div class="row"><button type="button" class="btn" id="reissue-key">重新生成</button></div>
+            <p class="state" id="connect-state"></p>
+          </div>
+        </section>
+
+        <section id="mine" class="view">
+          <h1>我的提交</h1>
+          <p class="lead">本菜单列出本人的提交。退回原因写在对应条目下。修订仍是这一条，不另开一条。</p>
+          <p class="state" id="mine-state"></p>
+          <div id="mine-list"></div>
+        </section>
+
+        <section id="form" class="view">
+          <h1 id="form-title">上架新产品</h1>
+          <p class="lead" id="form-lead">先选类型。用不到的项不出现。必填未填或内容不合格，不会进入审核。旁边的英文是提交字段名。打包规范由商店 MCP 的 get_spec 下发。</p>
+          <form id="sheet">
+            <div class="group">
+              <h2>身份</h2>
+              <label for="f-id">产品 id <span class="name">id</span> <abbr class="req">必填</abbr></label>
+              <input id="f-id" name="id" aria-required="true" />
+              <label for="f-version">版本 <span class="name">version</span> <abbr class="req">必填</abbr></label>
+              <input id="f-version" name="version" aria-required="true" />
+              <label for="f-kind">类型 <span class="name">kind</span></label>
+              <select id="f-kind" name="kind">
+                <option value="skill">技能</option>
+                <option value="mcp">MCP</option>
+                <option value="mcp+skill">技能和 MCP</option>
+                <option value="runtime">运行时</option>
+                <option value="knowledge">知识包</option>
+              </select>
+              <label for="f-submit-kind">提交方式 <span class="name">submit_kind</span></label>
+              <select id="f-submit-kind" name="submit_kind">
+                <option value="new_version">新版本</option>
+                <option value="add_platform" hidden>追加平台</option>
+              </select>
+              <p class="foot" id="submit-kind-note">只有运行时可以给同一个版本补一个平台的文件。技能和知识包一个版本只收一份。</p>
+              <label for="f-author">作者显示名 <span class="name">author.display_name</span> <abbr class="req">必填</abbr></label>
+              <input id="f-author" name="author.display_name" aria-required="true" />
+            </div>
+            <div class="group">
+              <h2>阐述</h2>
+              <label for="f-title">标题 <span class="name">title</span> <abbr class="req">必填</abbr></label>
+              <input id="f-title" name="title" aria-required="true" />
+              <label for="f-summary">一句话 <span class="name">summary</span> <abbr class="req">必填</abbr></label>
+              <input id="f-summary" name="summary" aria-required="true" />
+              <label for="f-description">说明 <span class="name">description</span> <abbr class="req">必填</abbr></label>
+              <textarea id="f-description" name="description" aria-required="true"></textarea>
+              <label for="f-changes">这一版的变更 <span class="name">changes</span> <abbr class="req">必填</abbr></label>
+              <textarea id="f-changes" name="changes" aria-required="true"></textarea>
+            </div>
+            <div class="group">
+              <h2>适用</h2>
+              <label for="f-platforms">适用平台 <span class="name">platforms</span> <abbr class="req">必填</abbr></label>
+              <input id="f-platforms" name="platforms" placeholder="any 或 darwin-arm64,windows-amd64" aria-required="true" />
+              <label for="f-clients">AI 工具 <span class="name">clients</span> <abbr class="req">必填</abbr></label>
+              <input id="f-clients" name="clients" placeholder="reasonix" aria-required="true" />
+            </div>
+            <div class="group" id="invoke-group">
+              <h2>调用</h2>
+              <p class="foot" id="invoke-note">这是一份技能，从 SKILL.md 读起。不用填连接地址。</p>
+              <div id="knowledge-fields" class="hidden">
+                <label for="f-entry">从哪一篇读起 <span class="name">knowledge.entry</span> <abbr class="req">必填</abbr></label>
+                <input id="f-entry" name="knowledge.entry" placeholder="00-导航概览.md" />
+                <p class="foot">笔记之间用篇名互相链接。篇名就是文件名，不带 .md。链到这组笔记以外的，交不上。</p>
+              </div>
+              <div id="mcp-fields" class="hidden">
+                <label for="f-transport">连接方式 <span class="name">mcp.transport</span></label>
+                <select id="f-transport" name="mcp.transport">
+                  <option value="streamable-http">streamable-http</option>
+                  <option value="stdio">stdio</option>
+                </select>
+                <div id="mcp-http">
+                  <label for="f-url">远程地址 <span class="name">mcp.url</span></label>
+                  <input id="f-url" name="mcp.url" />
+                </div>
+                <div id="mcp-stdio" class="hidden">
+                  <label for="f-command">本机命令 <span class="name">mcp.command</span></label>
+                  <input id="f-command" name="mcp.command" />
+                  <label for="f-args">参数 <span class="name">mcp.args</span></label>
+                  <input id="f-args" name="mcp.args" placeholder="空格分隔" />
+                </div>
+                <div id="mcp-invoke">
+                  <label for="f-invoke">调用形式 <span class="name">invoke.form</span></label>
+                  <select id="f-invoke" name="invoke.form">
+                    <option value="list_tools">list_tools</option>
+                    <option value="documented">documented</option>
+                  </select>
+                </div>
+              </div>
+              <div id="runtime-fields" class="hidden">
+                <label for="f-bin">命令名 <span class="name">runtime.bin_name</span></label>
+                <input id="f-bin" name="runtime.bin_name" />
+              </div>
+              <p class="foot" id="skill-invoke">invoke.form = load_skill，入口 SKILL.md。</p>
+            </div>
+            <div class="group" id="depends-group">
+              <h2>依赖</h2>
+              <p class="foot">没有就留空。知识包不引用别的产品，选它时这一组不出现。</p>
+              <label for="f-store">商店运行时 <span class="name">depends.store</span></label>
+              <textarea id="f-store" name="depends.store" placeholder="每行：id 版本范围"></textarea>
+              <label for="f-skills">技能 <span class="name">depends.skills</span></label>
+              <textarea id="f-skills" name="depends.skills" placeholder="每行：id 版本范围"></textarea>
+              <label for="f-mcp-deps">MCP <span class="name">depends.mcp</span></label>
+              <textarea id="f-mcp-deps" name="depends.mcp" placeholder="每行：id 版本范围"></textarea>
+              <label for="f-ext-name">外部命令 <span class="name">depends.external.name</span></label>
+              <input id="f-ext-name" name="depends.external.name" />
+              <label for="f-ext-range">版本范围 <span class="name">depends.external.version_range</span></label>
+              <input id="f-ext-range" name="depends.external.version_range" />
+              <label for="f-ext-detect">检测方法 <span class="name">depends.external.detect</span></label>
+              <input id="f-ext-detect" name="depends.external.detect" placeholder="命令和参数，空格分隔" />
+              <label for="f-ext-guide">安装说明 <span class="name">depends.external.install_guide</span></label>
+              <textarea id="f-ext-guide" name="depends.external.install_guide"></textarea>
+              <label for="f-ext-url">资源地址 <span class="name">depends.external.resources.url</span></label>
+              <input id="f-ext-url" name="depends.external.resources.url" placeholder="https://" />
+            </div>
+            <div class="group" id="secrets-group">
+              <h2>密钥名</h2>
+              <label for="f-secrets">变量名和用途 <span class="name">secrets</span></label>
+              <textarea id="f-secrets" name="secrets" placeholder="每行：变量名 用途。不要写值。"></textarea>
+            </div>
+            <div class="group" id="artifact-group">
+              <h2>制品</h2>
+              <p class="foot" id="artifact-note">技能交 SKILL.md。运行时交这个平台的文件。远程服务不用交文件。知识包交这组笔记。</p>
+              <div id="knowledge-file" class="hidden">
+                <label for="f-notes">这组笔记</label>
+                <input id="f-notes" name="notes" type="file" accept=".md,text/markdown" multiple />
+                <div class="file-pick">
+                  <label class="btn" for="f-notes-dir">选择笔记目录</label>
+                  <input id="f-notes-dir" type="file" webkitdirectory multiple />
+                </div>
+                <p class="foot" id="notes-dir-note">系统尾巴文件会被丢掉。只保留目录根上的 Markdown。</p>
+              </div>
+              <div id="skill-file">
+                <label for="f-skill">技能入口 <span class="name">SKILL.md</span></label>
+                <textarea id="f-skill" name="SKILL.md"></textarea>
+                <div class="file-pick">
+                  <label class="btn" for="f-skill-dir">选择技能目录</label>
+                  <input id="f-skill-dir" type="file" webkitdirectory multiple />
+                  <label class="btn" for="f-skill-files">或选择多个文件</label>
+                  <input id="f-skill-files" type="file" multiple />
+                </div>
+                <p class="foot" id="skill-dir-note">清单会填进表单，不随制品提交。系统尾巴文件不提交。</p>
+              </div>
+              <div id="runtime-file" class="hidden">
+                <label for="f-runtime-file">这个平台的文件</label>
+                <input id="f-runtime-file" name="runtime.file" type="file" />
+              </div>
+            </div>
+            <p class="field-error" id="form-error" hidden></p>
+            <div id="form-rules"></div>
+            <button type="submit" class="btn primary" id="form-submit">提交待审核</button>
+          </form>
+        </section>
+
+        <section id="review" class="view">
+          <h1>审核</h1>
+          <p class="lead">右列为作者提交的上架单与校验报告。本菜单不能改字段。不通过则退回。</p>
+          <div class="split">
+            <div>
+              <div id="review-queue"></div>
+              <p class="state" id="review-state"></p>
+              <button type="button" class="btn hidden" id="review-back" data-view="shelf">回到货架</button>
+            </div>
+            <div id="review-detail">
+              <p class="state">选左边的一条。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="audit" class="view">
+          <h1>审计</h1>
+          <p class="lead">只读记录。按 id 倒序，可按动作与产品过滤。只有审核能看。</p>
+          <div class="row">
+            <input id="audit-action" placeholder="动作，如 approve / submit" aria-label="动作" />
+            <input id="audit-package" placeholder="产品 id，如 luxi.gov-writer" aria-label="产品 id" />
+            <button type="button" class="btn" id="audit-query">查询</button>
+          </div>
+          <p class="state" id="audit-state">正在读取。</p>
+          <table>
+            <thead><tr><th>#</th><th>操作者</th><th>动作</th><th>产品</th><th>版本</th><th>通道</th><th>时间</th></tr></thead>
+            <tbody id="audit-rows"></tbody>
+          </table>
+          <div class="row">
+            <button type="button" class="btn" id="audit-more">加载更多</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <dialog id="login-box" aria-labelledby="login-heading">
+    <h2 id="login-heading">登录</h2>
+    <p class="lead">填写用户名和口令。</p>
+    <label for="login-username">用户名 <abbr class="req">必填</abbr></label>
+    <input id="login-username" autocomplete="username" aria-required="true" />
+    <label for="login-password">口令 <abbr class="req">必填</abbr></label>
+    <input id="login-password" type="password" autocomplete="current-password" aria-required="true" />
+    <p class="state" id="login-state"></p>
+    <div class="row">
+      <button type="button" class="btn primary" id="login-submit">登录</button>
+      <button type="button" class="btn" id="login-cancel">取消</button>
+    </div>
+    <p class="foot">还没有账号？<button type="button" class="btn" id="goto-register">去注册</button></p>
+  </dialog>
+  <dialog id="plan-drawer" aria-labelledby="plan-heading">
+    <h2 id="plan-heading">安装说明</h2>
+    <p class="lead">步骤只供查阅，不在本页执行。未登录不能在页面下载。</p>
+    <pre id="plan-body" class="diff"></pre>
+    <button type="button" class="btn" id="close-plan">关闭</button>
+  </dialog>
+  <script>
+    const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-arm64", "windows-amd64"];
+    const KIND_LABEL = { skill: "技能", mcp: "MCP", "mcp+skill": "技能与 MCP", runtime: "运行时", knowledge: "知识包" };
+    const ROLE_LABEL = { admin: "审核", publisher: "作者", member: "未授权" };
+    const SECURITY_LABEL = { public: "公开", internal: "内部", restricted: "受限", confidential: "机密" };
+    const SCOPE_LABEL = { enterprise: "企业", work: "工作产出" };
+    const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", issued: null };
+
+    function show(id) {
+      document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === id));
+      document.querySelectorAll(".nav button").forEach((button) => {
+        button.setAttribute("aria-current", button.dataset.view === id ? "page" : "false");
+      });
+      if (id === "shelf") loadCatalog("shelf");
+      if (id === "runtime") loadCatalog("runtime");
+      if (id === "mine") loadMine();
+      if (id === "review") loadReviews();
+      if (id === "audit") loadAudit(true);
+      if (id !== "admin-users") clearReset();
+      if (id === "admin-users" && state.role === "admin") loadManage();
+      if (id === "connect") renderConnect();
+    }
+
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest(".nav button[data-view], #review-back");
+      if (button && button.dataset.view) show(button.dataset.view);
+    });
+
+    function signedIn() { return state.role && state.role !== "anonymous"; }
+
+    async function api(path, options = {}) {
+      const headers = { ...(options.headers || {}) };
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+      const text = await response.text();
+      let body = {};
+      if (text) {
+        try { body = JSON.parse(text); } catch { body = { message: "响应不是 JSON" }; }
+      }
+      if (!response.ok) {
+        const error = new Error(body.message || "请求失败");
+        error.rule = body.rule || "";
+        throw error;
+      }
+      return body;
+    }
+
+    function text(tag, value, className) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      node.textContent = value == null ? "" : String(value);
+      return node;
+    }
+
+    function setState(id, message, isError) {
+      const node = document.getElementById(id);
+      node.textContent = message;
+      node.classList.toggle("error", Boolean(isError));
+    }
+
+    async function refreshWho() {
+      const who = document.getElementById("who");
+      try {
+        const me = await api("/v1/me");
+        state.role = me.role || "anonymous";
+        state.userId = me.id || "";
+        const named = state.role !== "anonymous";
+        who.textContent = named ? `${ROLE_LABEL[me.role] || me.role} · ${me.name}` : "未登录";
+        document.getElementById("login-open").classList.toggle("hidden", named);
+        document.getElementById("logout").classList.toggle("hidden", !named);
+        document.getElementById("users-out").classList.toggle("hidden", named && Boolean(me.username));
+        document.getElementById("profile-panel").classList.toggle("hidden", !named || !me.username);
+        const gate = document.getElementById("admin-gate");
+        const board = document.getElementById("admin-board");
+        board.classList.toggle("hidden", me.role !== "admin");
+        gate.classList.toggle("hidden", me.role === "admin");
+        document.getElementById("nav-audit").classList.toggle("hidden", me.role !== "admin");
+        if (me.role === "publisher") gate.textContent = "作者不能管理用户。";
+        if (!named) gate.textContent = "先用审核的口令登录。";
+        if (me.username) {
+          document.getElementById("profile-username").value = me.username;
+          document.getElementById("profile-real-name").value = me.real_name || "";
+          document.getElementById("profile-nickname").value = me.nickname || me.name || "";
+          document.getElementById("profile-department").value = me.department || "";
+          document.getElementById("profile-title").value = me.job_title || "";
+        }
+        state.mcpUrl = me.mcp_url || "";
+      } catch (error) {
+        state.role = "anonymous";
+        who.textContent = error.message || "未登录";
+      }
+    }
+
+    async function loadIdentity() {
+      try {
+        const info = await api("/v1/identity");
+        if (info.mode !== "hub" || !info.login) return;
+        const note = document.getElementById("identity-note");
+        if (note.dataset.hub) return;
+        note.dataset.hub = "1";
+        note.textContent += " 从实验室账号进来的，登录会自动续上，不用把一串令牌贴进来。";
+        // 只有商店配了授权页，才由商店签发 state 并带人去授权。
+        // 没配就说明这条入口不存在，不显示按钮，免得点出一个必然失败的跳转。
+        if (info.hub_start) {
+          document.getElementById("hub-login").classList.remove("hidden");
+        }
+      } catch { /* 静态说明仍可用 */ }
+    }
+
+    document.getElementById("login-open").addEventListener("click", () => openLogin());
+    // 交给浏览器整页跳转：state 由商店在同一个响应里写进 Cookie，
+    // 用 fetch 拿不到这次跳转，也就无法完成这一次登录。
+    document.getElementById("hub-login").addEventListener("click", () => {
+      window.location.assign("/auth/start");
+    });
+    document.getElementById("users-login").addEventListener("click", () => openLogin());
+    document.getElementById("goto-register").addEventListener("click", () => {
+      document.getElementById("login-box").close();
+      show("users");
+    });
+    document.getElementById("login-cancel").addEventListener("click", () => document.getElementById("login-box").close());
+    document.getElementById("logout").addEventListener("click", async () => {
+      await api("/v1/logout", { method: "POST", body: "{}" });
+      state.issued = null;
+      await refreshWho();
+      show("shelf");
+    });
+
+    document.getElementById("theme").addEventListener("click", () => {
+      const root = document.documentElement;
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      document.getElementById("theme").textContent = next === "dark" ? "浅色" : "深色";
+      sessionStorage.setItem("qilin-theme", next);
+    });
+
+    function card(item, shelf) {
+      const article = document.createElement("article");
+      article.className = "card goods";
+      const tags = document.createElement("div");
+      tags.className = "tags";
+      tags.append(
+        text("span", KIND_LABEL[item.kind] || item.kind, "tag"),
+        text("span", item.version, "tag gold"),
+      );
+      const author = item.author && item.author.display_name ? item.author.display_name : "";
+      const meta = [platformList(item.platforms).replaceAll(", ", " · "), (item.clients || []).join(" · "), author].filter(Boolean).join(" · ");
+      const row = document.createElement("div");
+      row.className = "row";
+      const open = text("button", "查看版本", "btn primary");
+      open.type = "button";
+      open.addEventListener("click", () => openDetail(item.id, shelf === "runtime"));
+      row.append(open);
+      article.append(
+        tags,
+        text("h3", item.title || item.id),
+        text("p", item.summary || "", "summary"),
+        text("p", item.id, "sku"),
+        text("p", meta, "meta"),
+        row,
+      );
+      return article;
+    }
+
+    async function loadCatalog(which) {
+      const kind = which === "runtime" ? "runtime" : state.shelfKind;
+      const grid = document.getElementById(which + "-grid");
+      const stateId = which + "-state";
+      const count = document.getElementById("shelf-count");
+      grid.replaceChildren();
+      setState(stateId, which === "runtime" ? "正在读取运行时。" : "正在读取货架。", false);
+      if (count && which === "shelf") count.textContent = "";
+      const query = which === "shelf" ? document.getElementById("query").value.trim() : "";
+      const params = new URLSearchParams();
+      if (kind) params.set("kind", kind);
+      if (query) params.set("query", query);
+      try {
+        const data = await api("/v1/catalog" + (params.toString() ? "?" + params : ""));
+        const items = data.items || [];
+        if (!items.length) {
+          setState(stateId, which === "runtime" ? "还没有已发布的运行时。" : "货架上还没有这类已发布的产品。", false);
+          return;
+        }
+        setState(stateId, "", false);
+        if (count && which === "shelf") count.textContent = `在架 ${items.length}`;
+        items.forEach((item) => grid.append(card(item, which)));
+      } catch (error) {
+        setState(stateId, error.message, true);
+      }
+    }
+
+    document.getElementById("query").addEventListener("change", () => loadCatalog("shelf"));
+    document.getElementById("search").addEventListener("click", () => loadCatalog("shelf"));
+    document.getElementById("kind-chips").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-kind]");
+      if (!button) return;
+      state.shelfKind = button.dataset.kind;
+      document.querySelectorAll("#kind-chips button").forEach((item) => {
+        item.setAttribute("aria-pressed", item === button ? "true" : "false");
+      });
+      loadCatalog("shelf");
+    });
+
+    async function openDetail(packageId, isRuntime) {
+      state.packageId = packageId;
+      state.kind = isRuntime ? "runtime" : "skill";
+      show("detail");
+      document.getElementById("detail-sheet").replaceChildren(text("p", "正在读取。", "state"));
+      try {
+        const listed = await api("/v1/packages/" + encodeURIComponent(packageId) + "/versions");
+        const versions = listed.versions || [];
+        if (!versions.length) {
+          document.getElementById("detail-title").textContent = packageId;
+          document.getElementById("detail-sheet").replaceChildren(text("p", "没有已发布版本。", "state"));
+          return;
+        }
+        const rows = document.getElementById("version-rows");
+        rows.replaceChildren();
+        const versionSelect = document.getElementById("plan-version");
+        versionSelect.replaceChildren();
+        versions.forEach((item) => {
+          const tr = document.createElement("tr");
+          [item.version, item.changes, platformList(item.platforms), (item.clients || []).join(", ")]
+            .forEach((value) => tr.append(text("td", value)));
+          rows.append(tr);
+          versionSelect.append(new Option(item.version, item.version));
+        });
+        versionSelect.onchange = () => loadDescribed(packageId, versionSelect.value, versions);
+        await loadDescribed(packageId, versions[versions.length - 1].version, versions);
+        versionSelect.value = versions[versions.length - 1].version;
+      } catch (error) {
+        document.getElementById("detail-sheet").replaceChildren(text("p", error.message, "state error"));
+      }
+    }
+
+    async function loadDescribed(packageId, version, versions) {
+      const manifest = await api("/v1/packages/" + encodeURIComponent(packageId) + "/" + encodeURIComponent(version));
+      state.base = manifest;
+      state.kind = manifest.kind;
+      document.getElementById("detail-title").textContent = manifest.title || packageId;
+      document.getElementById("detail-lead").textContent = manifest.summary || packageId;
+      document.getElementById("detail-prose").textContent = manifest.description || "";
+      document.getElementById("add-platform").classList.toggle("hidden", manifest.kind !== "runtime");
+      fillChoices(manifest, versions.find((item) => item.version === version));
+      document.getElementById("detail-sheet").replaceChildren(sheet(manifest, null));
+    }
+
+    function fillChoices(manifest, versionRow) {
+      const clients = document.getElementById("plan-client");
+      const platforms = document.getElementById("plan-platform");
+      clients.replaceChildren();
+      platforms.replaceChildren();
+      (manifest.clients || []).forEach((item) => clients.append(new Option(item, item)));
+      const declared = (versionRow && versionRow.platforms) || manifest.platforms || [];
+      const broad = declared.includes("any");
+      const choices = broad ? CONCRETE : declared;
+      choices.forEach((item) => platforms.append(new Option(item, item)));
+      document.getElementById("plan-note").textContent = broad
+        ? "上表「任意平台」为作者写入这一版的适用平台。下方选择本机平台，只用于生成安装说明，不改产品。列表第一项不是创建时保存的数据。页面下载须先登录。"
+        : "下方只列出这一版已经发布的平台。请选择要安装的电脑。此选择不改这一版的适用平台。页面下载须先登录。";
+    }
+
+    function platformList(list) {
+      return (list || []).map((item) => (item === "any" ? "任意平台" : item)).join(", ");
+    }
+
+    function platformText(list) {
+      if (!list || !list.length) return "未写";
+      if (list.length === 1 && list[0] === "any") return "任意平台。不挑操作系统，也不表示只适用于某一种电脑。";
+      return list.join("、");
+    }
+
+    function sheet(manifest, submitKind) {
+      const root = document.createElement("div");
+      const author = (manifest.author || {}).display_name || "";
+      const groups = [
+        ["身份", [
+          ["产品", manifest.id || ""],
+          ["版本", manifest.version || ""],
+          ["类型", KIND_LABEL[manifest.kind] || manifest.kind || ""],
+          ["作者", author],
+          ["提交", submitKind || ""],
+        ]],
+        ["这一版在说什么", [
+          ["一句话", manifest.summary || ""],
+          ["说明", manifest.description || ""],
+          ["相对上一版", manifest.changes || ""],
+        ]],
+        ["适用", [
+          ["平台", platformText(manifest.platforms)],
+          ["AI 工具", (manifest.clients || []).join("、") || "未写"],
+        ]],
+        ["怎么调用", [
+          ["方式", invokeText(manifest)],
+          ["连接", connectText(manifest)],
+        ]],
+        ["要先准备什么", [["依赖", dependText(manifest)]]],
+        ["产品密钥", [["名字", secretText(manifest)]]],
+      ];
+      const knowledge = manifest.knowledge;
+      if (knowledge) {
+        const taxonomy = knowledge.taxonomy || {};
+        groups.push(["知识包", [
+          ["分类", [taxonomy.business_category, taxonomy.business_domain, taxonomy.knowledge_kind].filter(Boolean).join(" / ")],
+          ["入口", knowledge.entry || ""],
+          ["密级", SECURITY_LABEL[knowledge.security_level] || knowledge.security_level || ""],
+          ["范围", SCOPE_LABEL[knowledge.scope] || knowledge.scope || ""],
+          ["词表", knowledge.vocabulary || ""],
+          ["语言 / 许可", [knowledge.language, knowledge.license].filter(Boolean).join(" / ")],
+          ["生产溯源", knowledge.producer || ""],
+          ["本地主题", (knowledge.topics || []).join("、")],
+        ]]);
+      }
+      groups.forEach(([title, pairs]) => {
+        const group = document.createElement("div");
+        group.className = "group";
+        group.append(text("h2", title));
+        const list = document.createElement("dl");
+        list.className = "kv";
+        pairs.forEach(([name, value]) => {
+          if (!value) return;
+          list.append(text("dt", name), text("dd", value));
+        });
+        group.append(list);
+        root.append(group);
+      });
+      return root;
+    }
+
+    function invokeText(manifest) {
+      const form = (manifest.invoke || {}).form || "";
+      const entry = (manifest.skill || {}).entry || (manifest.invoke || {}).entry || "SKILL.md";
+      if (form === "load_skill") return `按技能加载，入口是 ${entry}。不建立连接。`;
+      if (form === "load_skill_then_mcp") return `先加载技能 ${entry}，再调用这个包里的 MCP。`;
+      if (form === "list_tools") return "连上之后，向服务器要工具列表。";
+      if (form === "documented") return "工具名已经写在清单里。";
+      if (form === "exec_bin") return `执行 ${(manifest.runtime || {}).bin_name || "这个二进制"}。`;
+      return form || "没有调用说明。";
+    }
+
+    function connectText(manifest) {
+      const mcp = manifest.mcp;
+      if (!mcp) return "";
+      if (mcp.transport === "stdio") return `本机命令：${mcp.command || ""} ${(mcp.args || []).join(" ")}`.trim();
+      if (mcp.url) return `远程地址：${mcp.url}`;
+      return "";
+    }
+
+    function dependText(manifest) {
+      const depends = manifest.depends || {};
+      const lines = [];
+      (depends.store || []).forEach((item) => lines.push(`商店里的运行时 ${item.id} ${item.version || ""}`.trim()));
+      (depends.skills || []).forEach((item) => lines.push(`先装技能 ${item.id} ${item.version || ""}`.trim()));
+      (depends.mcp || []).forEach((item) => lines.push(`先装 MCP ${item.id} ${item.version || ""}`.trim()));
+      (depends.external || []).forEach((item) => lines.push(`本机要有 ${item.name}。${item.install_guide || ""}`.trim()));
+      return lines.join("\n") || "没有要先安装的东西。";
+    }
+
+    function secretText(manifest) {
+      const secrets = manifest.secrets || [];
+      if (!secrets.length) return "这份产品不向你要密钥。";
+      return secrets.map((item) => `${item.name}：${item.description || "用途未写"}`).join("\n");
+    }
+
+    let auditOffset = 0;
+    async function loadAudit(reset) {
+      if (state.role !== "admin") {
+        setState("audit-state", "用审核账号登录后才能看审计。", false);
+        document.getElementById("audit-rows").replaceChildren();
+        document.getElementById("audit-more").classList.add("hidden");
+        return;
+      }
+      if (reset) {
+        auditOffset = 0;
+        document.getElementById("audit-rows").replaceChildren();
+      }
+      const action = document.getElementById("audit-action").value.trim();
+      const packageId = document.getElementById("audit-package").value.trim();
+      const params = new URLSearchParams({ limit: "50", offset: String(auditOffset) });
+      if (action) params.set("action", action);
+      if (packageId) params.set("package_id", packageId);
+      setState("audit-state", "正在读取。", false);
+      try {
+        const page = await api("/v1/audit?" + params.toString());
+        const rows = document.getElementById("audit-rows");
+        (page.items || []).forEach((item) => {
+          const tr = document.createElement("tr");
+          [item.id, item.actor_name || item.actor, item.action, item.package_id || "", item.version || "", item.channel || "", item.at || ""]
+            .forEach((value) => tr.append(text("td", value)));
+          rows.append(tr);
+        });
+        auditOffset += (page.items || []).length;
+        setState("audit-state", `共 ${page.total} 条，已显示 ${auditOffset} 条。`, false);
+        document.getElementById("audit-more").classList.toggle("hidden", auditOffset >= page.total);
+      } catch (error) {
+        setState("audit-state", error.message, true);
+      }
+    }
+
+    document.getElementById("audit-query").addEventListener("click", () => loadAudit(true));
+    document.getElementById("audit-more").addEventListener("click", () => loadAudit(false));
+    document.getElementById("namespace-transfer").addEventListener("click", async () => {
+      const namespace = document.getElementById("namespace-name").value.trim();
+      const account = document.getElementById("namespace-owner").value;
+      if (!namespace || !account) {
+        setState("namespace-state", "命名空间和接收者都要填。", true);
+        return;
+      }
+      try {
+        await api("/v1/namespaces/" + encodeURIComponent(namespace) + "/transfer", {
+          method: "POST",
+          body: JSON.stringify({ account_id: account }),
+        });
+        setState("namespace-state", `已把 ${namespace} 转给所选账号。`, false);
+      } catch (error) {
+        setState("namespace-state", error.message, true);
+      }
+    });
+
+    document.getElementById("back-shelf").addEventListener("click", () => {
+      show(state.kind === "runtime" ? "runtime" : "shelf");
+    });
+
+    document.getElementById("show-plan").addEventListener("click", async () => {
+      const button = document.getElementById("show-plan");
+      const body = document.getElementById("plan-body");
+      document.getElementById("plan-drawer").showModal();
+      if (!signedIn()) {
+        body.textContent = "请先登录。本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具浏览、下载、使用，请查看 连接 菜单。";
+        return;
+      }
+      button.disabled = true;
+      body.textContent = "正在生成安装说明。";
+      try {
+        const plan = await api("/v1/install-plan", {
+          method: "POST",
+          body: JSON.stringify({
+            id: state.packageId,
+            version: document.getElementById("plan-version").value,
+            client: document.getElementById("plan-client").value,
+            platform: document.getElementById("plan-platform").value,
+          }),
+        });
+        body.textContent = (plan.steps || []).map((step) => JSON.stringify(step)).join("\n");
+      } catch (error) {
+        body.textContent = (error.rule ? error.rule + " " : "") + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.getElementById("close-plan").addEventListener("click", () => document.getElementById("plan-drawer").close());
+
+    document.getElementById("new-product").addEventListener("click", () => openForm("new", null, null));
+    document.getElementById("new-version").addEventListener("click", () => openForm("new_version", null, state.base));
+    document.getElementById("add-platform").addEventListener("click", () => openForm("add_platform", null, state.base));
+
+    let skillExtras = {};
+    let noteFiles = null;
+    let readingFiles = false;
+
+    function openForm(mode, submissionId, manifest) {
+      skillExtras = {};
+      noteFiles = null;
+      state.mode = mode;
+      state.submissionId = submissionId;
+      state.base = manifest;
+      const titles = {
+        new: "上架新产品",
+        new_version: "上架新版本",
+        add_platform: "追加平台",
+        revise: "修订此提交",
+      };
+      document.getElementById("form-title").textContent = titles[mode];
+      document.getElementById("form-submit").textContent = mode === "revise" ? "修订此提交" : "提交待审核";
+      fillForm(manifest, mode);
+      document.getElementById("form-error").hidden = true;
+      document.getElementById("form-rules").replaceChildren();
+      show("form");
+      document.getElementById("f-version").focus();
+    }
+
+    function fillForm(manifest, mode) {
+      const form = document.getElementById("sheet");
+      form.reset();
+      const source = manifest || {};
+      document.getElementById("f-id").value = source.id || "";
+      document.getElementById("f-version").value = mode === "new_version" ? "" : (source.version || "");
+      document.getElementById("f-kind").value = source.kind || "skill";
+      document.getElementById("f-submit-kind").value = mode === "add_platform" ? "add_platform" : "new_version";
+      document.getElementById("f-author").value = (source.author || {}).display_name || "";
+      document.getElementById("f-title").value = source.title || "";
+      document.getElementById("f-summary").value = source.summary || "";
+      document.getElementById("f-description").value = source.description || "";
+      document.getElementById("f-changes").value = mode === "new_version" ? "" : (source.changes || "");
+      document.getElementById("f-platforms").value = mode === "add_platform" ? "" : (source.platforms || []).join(",");
+      document.getElementById("f-clients").value = (source.clients || []).join(",");
+      const mcp = source.mcp || {};
+      document.getElementById("f-transport").value = mcp.transport || "streamable-http";
+      document.getElementById("f-url").value = mcp.url || "";
+      document.getElementById("f-command").value = mcp.command || "";
+      document.getElementById("f-args").value = (mcp.args || []).join(" ");
+      const invoke = source.invoke || {};
+      if (invoke.form === "list_tools" || invoke.form === "documented") {
+        document.getElementById("f-invoke").value = invoke.form;
+      }
+      document.getElementById("f-bin").value = (source.runtime || {}).bin_name || "";
+      const depends = source.depends || {};
+      document.getElementById("f-store").value = lines(depends.store);
+      document.getElementById("f-skills").value = lines(depends.skills);
+      document.getElementById("f-mcp-deps").value = lines(depends.mcp);
+      const external = (depends.external || [])[0] || {};
+      document.getElementById("f-ext-name").value = external.name || "";
+      document.getElementById("f-ext-range").value = external.version_range || "";
+      document.getElementById("f-ext-detect").value = (external.detect || []).join(" ");
+      document.getElementById("f-ext-guide").value = external.install_guide || "";
+      document.getElementById("f-ext-url").value = ((external.resources || [])[0] || {}).url || "";
+      document.getElementById("f-secrets").value = (source.secrets || []).map((item) => `${item.name} ${item.description || ""}`).join("\n");
+      const lock = mode === "add_platform";
+      ["f-id", "f-version", "f-kind", "f-submit-kind", "f-author", "f-title", "f-summary", "f-description", "f-changes", "f-clients"]
+        .forEach((id) => { document.getElementById(id).readOnly = lock || (mode === "new_version" && (id === "f-id" || id === "f-kind")); });
+      document.getElementById("f-kind").disabled = lock || mode === "new_version" || mode === "revise";
+      document.getElementById("f-submit-kind").disabled = mode !== "new";
+      syncKind();
+    }
+
+    function lines(items) {
+      return (items || []).map((item) => `${item.id} ${item.version || item.version_range || "*"}`).join("\n");
+    }
+
+    function syncKind() {
+      const kind = document.getElementById("f-kind").value;
+      const skill = kind === "skill" || kind === "mcp+skill";
+      const mcp = kind === "mcp" || kind === "mcp+skill";
+      const runtime = kind === "runtime";
+      const knowledge = kind === "knowledge";
+      const invokeNotes = {
+        skill: "这是一份技能，从 SKILL.md 读起。不用填连接地址。",
+        mcp: "远程服务只填地址，本机服务只填命令和参数。没有要交的文件。",
+        "mcp+skill": "先填怎么连接，再交 SKILL.md。",
+        runtime: "这是要随版本发布的命令文件，按平台各交一份。",
+        knowledge: "这是一组笔记。从入口那一篇读起，链接只能指向包里的篇名。",
+      };
+      document.getElementById("invoke-note").textContent = invokeNotes[kind];
+      document.getElementById("knowledge-fields").classList.toggle("hidden", !knowledge);
+      document.getElementById("mcp-fields").classList.toggle("hidden", !mcp);
+      document.getElementById("mcp-invoke").classList.toggle("hidden", kind !== "mcp");
+      document.getElementById("runtime-fields").classList.toggle("hidden", !runtime);
+      document.getElementById("skill-invoke").classList.toggle("hidden", !skill);
+      document.getElementById("skill-invoke").textContent = kind === "mcp+skill"
+        ? "先读 SKILL.md，再连接 MCP。"
+        : "从 SKILL.md 读起。";
+      document.getElementById("skill-file").classList.toggle("hidden", !skill);
+      document.getElementById("knowledge-file").classList.toggle("hidden", !knowledge);
+      document.getElementById("runtime-file").classList.toggle("hidden", !runtime);
+      document.getElementById("depends-group").classList.toggle("hidden", knowledge);
+      document.getElementById("secrets-group").classList.toggle("hidden", knowledge);
+      document.getElementById("artifact-group").classList.toggle("hidden", !skill && !runtime && !knowledge);
+      const submitKind = document.getElementById("f-submit-kind");
+      submitKind.querySelector('option[value="add_platform"]').hidden = !runtime;
+      if (!runtime && submitKind.value === "add_platform" && !submitKind.disabled) {
+        submitKind.value = "new_version";
+      }
+      syncTransport();
+    }
+
+    function syncTransport() {
+      const stdio = document.getElementById("f-transport").value === "stdio";
+      document.getElementById("mcp-http").classList.toggle("hidden", stdio);
+      document.getElementById("mcp-stdio").classList.toggle("hidden", !stdio);
+    }
+    document.getElementById("f-kind").addEventListener("change", syncKind);
+    document.getElementById("f-transport").addEventListener("change", syncTransport);
+    document.getElementById("f-skill-dir").addEventListener("change", (event) => {
+      ingestSkillFiles(event.target.files);
+    });
+    document.getElementById("f-skill-files").addEventListener("change", (event) => {
+      ingestSkillFiles(event.target.files);
+    });
+    document.getElementById("f-notes-dir").addEventListener("change", (event) => {
+      ingestNoteFiles(event.target.files);
+    });
+    document.getElementById("f-notes").addEventListener("change", (event) => {
+      ingestNoteFiles(event.target.files);
+    });
+
+    function isIgnoredClientPath(rel) {
+      const clean = String(rel || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      if (!clean || clean === ".") return false;
+      const parts = clean.split("/").filter((part) => part && part !== ".");
+      if (!parts.length) return false;
+      const dirs = new Set(["__MACOSX", ".git", ".svn", ".hg", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"]);
+      const names = new Set([".DS_Store", "Thumbs.db", "desktop.ini", ".storeignore"]);
+      for (const part of parts.slice(0, -1)) {
+        if (dirs.has(part) || part.startsWith("._")) return true;
+      }
+      const name = parts[parts.length - 1];
+      return names.has(name) || dirs.has(name) || name.startsWith("._");
+    }
+
+    function relativeFromPicker(file) {
+      if (!file.webkitRelativePath) return file.name;
+      const parts = file.webkitRelativePath.split("/").filter(Boolean);
+      return parts.slice(1).join("/") || file.name;
+    }
+
+    function fillFromManifest(data) {
+      if (!data || typeof data !== "object") return;
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el || value == null || value === "") return;
+        el.value = String(value);
+      };
+      set("f-id", data.id);
+      set("f-version", data.version);
+      set("f-title", data.title);
+      set("f-summary", data.summary);
+      set("f-description", data.description);
+      set("f-changes", data.changes);
+      if (Array.isArray(data.platforms)) set("f-platforms", data.platforms.join(","));
+      if (Array.isArray(data.clients)) set("f-clients", data.clients.join(","));
+      if (data.author && data.author.display_name) set("f-author", data.author.display_name);
+      const kind = document.getElementById("f-kind");
+      if (data.kind && kind && !kind.disabled && kind.querySelector(`option[value="${data.kind}"]`)) {
+        kind.value = data.kind;
+        syncKind();
+      }
+    }
+
+    async function ingestSkillFiles(fileList) {
+      readingFiles = true;
+      const incoming = {};
+      let count = 0;
+      try {
+        for (const file of fileList) {
+          const rel = relativeFromPicker(file);
+          if (!rel || isIgnoredClientPath(rel)) continue;
+          if (rel === "manifest.json") {
+            try {
+              fillFromManifest(JSON.parse(await file.text()));
+            } catch (error) {
+              /* 清单读不出来就不填，也不放进制品 */
+            }
+            continue;
+          }
+          if (rel === "SKILL.md") {
+            document.getElementById("f-skill").value = await file.text();
+            count += 1;
+            continue;
+          }
+          incoming[rel] = await b64(await file.arrayBuffer());
+          count += 1;
+        }
+        skillExtras = incoming;
+        const note = document.getElementById("skill-dir-note");
+        note.textContent = count
+          ? `已读入 ${count} 个文件。清单会填进表单，不随制品提交。系统尾巴文件不提交。`
+          : "清单会填进表单，不随制品提交。系统尾巴文件不提交。";
+      } finally {
+        readingFiles = false;
+      }
+    }
+
+    async function ingestNoteFiles(fileList) {
+      readingFiles = true;
+      const incoming = {};
+      try {
+        for (const file of fileList) {
+          const rel = relativeFromPicker(file);
+          if (!rel || isIgnoredClientPath(rel) || rel.includes("/")) continue;
+          if (!rel.toLowerCase().endsWith(".md")) continue;
+          incoming[rel] = await b64(await file.arrayBuffer());
+        }
+        noteFiles = incoming;
+        const count = Object.keys(incoming).length;
+        document.getElementById("notes-dir-note").textContent =
+          `已保留根上 ${count} 篇 Markdown。系统尾巴文件会被丢掉。子目录里的文件不进入知识包。`;
+      } finally {
+        readingFiles = false;
+      }
+    }
+
+    function splitList(value) {
+      return value.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
+    }
+
+    function depLines(value) {
+      return value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+        const [id, version] = line.split(/\s+/, 2);
+        return { id, version: version || "*" };
+      });
+    }
+
+    async function manifestFromForm() {
+      const kind = document.getElementById("f-kind").value;
+      const mode = state.mode;
+      if (readingFiles) throw new Error("正在读取所选文件，请稍候再提交");
+      if (mode === "add_platform" && state.base) {
+        const copy = JSON.parse(JSON.stringify(state.base));
+        const platform = document.getElementById("f-platforms").value.trim();
+        const file = document.getElementById("f-runtime-file").files[0];
+        if (!file) throw Object.assign(new Error("追加平台需要上传这个平台的文件"), { rule: "RUNTIME_ASSET" });
+        const digest = await sha256(await file.arrayBuffer());
+        copy.platforms = [platform];
+        copy.runtime = copy.runtime || { bin_name: document.getElementById("f-bin").value.trim() };
+        copy.runtime.assets = [{ platform, path: `${platform}/${file.name}`, sha256: digest }];
+        return { manifest: copy, files: { [`${platform}/${file.name}`]: await b64(await file.arrayBuffer()) } };
+      }
+      const manifest = {
+        spec_version: 1,
+        id: document.getElementById("f-id").value.trim(),
+        version: document.getElementById("f-version").value.trim(),
+        kind,
+        title: document.getElementById("f-title").value.trim(),
+        summary: document.getElementById("f-summary").value.trim(),
+        description: document.getElementById("f-description").value.trim(),
+        changes: document.getElementById("f-changes").value.trim(),
+        author: { display_name: document.getElementById("f-author").value.trim() },
+        platforms: splitList(document.getElementById("f-platforms").value),
+        clients: splitList(document.getElementById("f-clients").value),
+        depends: {
+          store: depLines(document.getElementById("f-store").value),
+          skills: depLines(document.getElementById("f-skills").value),
+          mcp: depLines(document.getElementById("f-mcp-deps").value),
+          external: [],
+        },
+        secrets: document.getElementById("f-secrets").value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+          const [name, ...rest] = line.split(/\s+/);
+          return { name, description: rest.join(" ") };
+        }),
+      };
+      const extName = document.getElementById("f-ext-name").value.trim();
+      if (extName) {
+        manifest.depends.external.push({
+          name: extName,
+          version_range: document.getElementById("f-ext-range").value.trim(),
+          detect: document.getElementById("f-ext-detect").value.trim().split(/\s+/),
+          install_guide: document.getElementById("f-ext-guide").value.trim(),
+          resources: [{
+            title: extName,
+            url: document.getElementById("f-ext-url").value.trim(),
+            platform: "any",
+          }],
+        });
+      }
+      const files = {};
+      if (kind === "skill" || kind === "mcp+skill") {
+        manifest.skill = { entry: "SKILL.md" };
+        manifest.invoke = {
+          form: kind === "mcp+skill" ? "load_skill_then_mcp" : "load_skill",
+          entry: "SKILL.md",
+        };
+        const skill = document.getElementById("f-skill").value;
+        if (skill) files["SKILL.md"] = b64text(skill);
+        Object.assign(files, skillExtras);
+      }
+      if (kind === "mcp" || kind === "mcp+skill") {
+        const transport = document.getElementById("f-transport").value;
+        manifest.mcp = { transport };
+        if (transport === "stdio") {
+          manifest.mcp.command = document.getElementById("f-command").value.trim();
+          manifest.mcp.args = document.getElementById("f-args").value.trim().split(/\s+/).filter(Boolean);
+        } else {
+          manifest.mcp.url = document.getElementById("f-url").value.trim();
+        }
+        if (kind === "mcp") manifest.invoke = { form: document.getElementById("f-invoke").value };
+      }
+      if (kind === "knowledge") {
+        const entry = document.getElementById("f-entry").value.trim();
+        manifest.knowledge = { entry };
+        manifest.invoke = { form: "read_notes", entry };
+        manifest.depends = { store: [], external: [], skills: [], mcp: [] };
+        manifest.secrets = [];
+        if (noteFiles) {
+          Object.assign(files, noteFiles);
+        } else {
+          const notes = document.getElementById("f-notes").files;
+          for (const file of notes) {
+            if (isIgnoredClientPath(file.name)) continue;
+            files[file.name] = await b64(await file.arrayBuffer());
+          }
+        }
+      }
+      if (kind === "runtime") {
+        const file = document.getElementById("f-runtime-file").files[0];
+        const bin = document.getElementById("f-bin").value.trim();
+        manifest.runtime = { bin_name: bin, assets: [] };
+        manifest.invoke = { form: "exec_bin", bin_name: bin };
+        if (file) {
+          const platform = (manifest.platforms || [])[0];
+          const digest = await sha256(await file.arrayBuffer());
+          const path = `${platform}/${file.name}`;
+          manifest.runtime.assets = [{ platform, path, sha256: digest }];
+          files[path] = await b64(await file.arrayBuffer());
+        }
+      }
+      return { manifest, files };
+    }
+
+    function b64text(value) {
+      const bytes = new TextEncoder().encode(value);
+      let binary = "";
+      bytes.forEach((item) => { binary += String.fromCharCode(item); });
+      return btoa(binary);
+    }
+
+    async function b64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      bytes.forEach((item) => { binary += String.fromCharCode(item); });
+      return btoa(binary);
+    }
+
+    async function sha256(buffer) {
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2, "0")).join("");
+    }
+
+    document.getElementById("sheet").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("form-submit");
+      const error = document.getElementById("form-error");
+      const rules = document.getElementById("form-rules");
+      button.disabled = true;
+      error.hidden = true;
+      rules.replaceChildren();
+      const missing = firstEmpty([
+        ["f-id", "id"],
+        ["f-version", "version"],
+        ["f-author", "author.display_name"],
+        ["f-title", "title"],
+        ["f-summary", "summary"],
+        ["f-description", "description"],
+        ["f-changes", "changes"],
+        ["f-platforms", "platforms"],
+        ["f-clients", "clients"],
+      ]);
+      if (missing) {
+        button.disabled = false;
+        error.hidden = false;
+        error.textContent = missing + "是必填。";
+        return;
+      }
+      try {
+        const built = await manifestFromForm();
+        const checked = await api("/v1/validate", { method: "POST", body: JSON.stringify({ manifest: built.manifest }) });
+        const failures = (checked.findings || []).filter((item) => item.severity === "error");
+        if (failures.length) {
+          showFindings(rules, failures);
+          return;
+        }
+        const path = state.mode === "revise"
+          ? `/v1/submissions/${state.submissionId}/revise`
+          : "/v1/submissions";
+        const result = await api(path, {
+          method: "POST",
+          body: JSON.stringify({
+            manifest: built.manifest,
+            files: built.files,
+            submit_kind: document.getElementById("f-submit-kind").value,
+          }),
+        });
+        if (result.status !== "pending") {
+          showFindings(rules, (result.rules || []).map((rule) => ({ rule, path: "", message: "" })));
+          error.hidden = false;
+          error.textContent = "校验没有通过，没有进入审核队列。";
+          return;
+        }
+        show("mine");
+      } catch (caught) {
+        error.hidden = false;
+        error.textContent = (caught.rule ? caught.rule + " " : "") + caught.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function showFindings(container, findings) {
+      container.replaceChildren();
+      findings.forEach((item) => {
+        container.append(text("div", `${item.rule}  ${item.path}  ${item.message}`.trim(), "rule"));
+      });
+    }
+
+    async function loadMine() {
+      const list = document.getElementById("mine-list");
+      list.replaceChildren();
+      if (!signedIn()) {
+        setState("mine-state", "先登录。作者用自己创建的 KEY。", false);
+        return;
+      }
+      setState("mine-state", "正在读取提交。", false);
+      try {
+        const data = await api("/v1/mine");
+        const items = data.items || [];
+        if (!items.length) {
+          setState("mine-state", "还没有提交。", false);
+          return;
+        }
+        setState("mine-state", "", false);
+        for (const item of items) {
+          const block = document.createElement("article");
+          block.className = "card";
+          block.style.marginBottom = "12px";
+          block.append(text("h3", `${item.package_id} · ${item.version}`));
+          block.append(text("p", item.status, "foot"));
+          if (item.review_reason) block.append(text("p", "退回原因：" + item.review_reason));
+          if (item.status === "pending" || item.status === "rejected") {
+            const button = text("button", "修订此提交", "btn");
+            button.type = "button";
+            button.addEventListener("click", () => revise(item.id));
+            block.append(button);
+          }
+          list.append(block);
+        }
+      } catch (error) {
+        setState("mine-state", error.message, true);
+      }
+    }
+
+    async function revise(submissionId) {
+      const detail = await api("/v1/submissions/" + submissionId);
+      openForm("revise", submissionId, detail.manifest);
+      if (detail.review_reason) {
+        const error = document.getElementById("form-error");
+        error.hidden = false;
+        error.textContent = "上次退回：" + detail.review_reason;
+      }
+      showFindings(document.getElementById("form-rules"), detail.findings || []);
+    }
+
+    async function loadReviews() {
+      const queue = document.getElementById("review-queue");
+      const detail = document.getElementById("review-detail");
+      queue.replaceChildren();
+      detail.replaceChildren(text("p", "选左边的一条。", "state"));
+      document.getElementById("review-back").classList.add("hidden");
+      if (state.role !== "admin") {
+        setState("review-state", "先用审核的 KEY 登录。作者看不到这一页。", false);
+        return;
+      }
+      setState("review-state", "正在读取审核队列。", false);
+      try {
+        const data = await api("/v1/reviews");
+        const items = data.items || [];
+        if (!items.length) {
+          setState("review-state", "没有待审核的提交。", false);
+          document.getElementById("review-back").classList.remove("hidden");
+          return;
+        }
+        setState("review-state", "", false);
+        items.forEach((item) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "list-btn";
+          button.append(text("strong", item.title || item.package_id));
+          button.append(document.createElement("br"));
+          button.append(text("span", `${item.status} · ${item.submit_kind} · ${item.package_id}`, "foot"));
+          button.addEventListener("click", () => openReview(item.id, button));
+          queue.append(button);
+        });
+      } catch (error) {
+        setState("review-state", error.message, true);
+      }
+    }
+
+    function renderDiff(patch) {
+      const pre = document.createElement("pre");
+      pre.className = "diff-view";
+      String(patch).split("\n").forEach((line) => {
+        const row = document.createElement("div");
+        if (line.startsWith("+") && !line.startsWith("+++")) row.className = "diff-add";
+        else if (line.startsWith("-") && !line.startsWith("---")) row.className = "diff-del";
+        else if (line.startsWith("@@")) row.className = "diff-hunk";
+        row.textContent = line;
+        pre.append(row);
+      });
+      return pre;
+    }
+
+    async function openReview(submissionId, button) {
+      document.querySelectorAll("#review-queue .list-btn").forEach((item) => item.setAttribute("aria-pressed", "false"));
+      button.setAttribute("aria-pressed", "true");
+      const detail = document.getElementById("review-detail");
+      detail.replaceChildren(text("p", "正在读取。", "state"));
+      try {
+        const sheetData = await api("/v1/reviews/" + submissionId);
+        detail.replaceChildren();
+        const head = document.createElement("div");
+        head.className = "group";
+        const tags = document.createElement("div");
+        tags.className = "tags";
+        tags.append(text("span", "待审核", "tag gold"));
+        head.append(tags);
+        detail.append(head, sheet(sheetData.manifest, sheetData.submit_kind));
+        const checks = document.createElement("div");
+        checks.className = "group";
+        checks.append(text("h2", "校验"));
+        if (!(sheetData.findings || []).length) checks.append(text("p", "没有规则。"));
+        (sheetData.findings || []).forEach((item) => checks.append(text("div", `${item.rule}  ${item.path}  ${item.message}`, "rule")));
+        const diff = document.createElement("div");
+        diff.className = "group";
+        diff.append(text("h2", "与上一版"));
+        if (!(sheetData.diff || []).length) diff.append(text("p", "无已发布版本。", "diff"));
+        else diff.append(text("pre", (sheetData.diff || []).map((item) => `${item.path}\n- ${JSON.stringify(item.before)}\n+ ${JSON.stringify(item.after)}`).join("\n\n"), "diff"));
+        const actions = document.createElement("div");
+        actions.className = "row";
+        const publish = text("button", "发布", "btn primary");
+        publish.type = "button";
+        const reject = text("button", "退回", "btn danger");
+        reject.type = "button";
+        const reason = document.createElement("textarea");
+        reason.placeholder = "作者和 MCP get_submission 会看到这句";
+        const note = text("p", "", "field-error");
+        publish.addEventListener("click", async () => {
+          publish.disabled = true;
+          reject.disabled = true;
+          note.textContent = "";
+          try {
+            await api(`/v1/submissions/${submissionId}/approve`, { method: "POST" });
+            loadReviews();
+          } catch (error) {
+            note.textContent = (error.rule ? error.rule + " " : "") + error.message;
+            publish.disabled = false;
+            reject.disabled = false;
+          }
+        });
+        reject.addEventListener("click", async () => {
+          if (!reason.value.trim()) { reason.focus(); return; }
+          publish.disabled = true;
+          reject.disabled = true;
+          note.textContent = "";
+          try {
+            await api(`/v1/submissions/${submissionId}/reject`, {
+              method: "POST",
+              body: JSON.stringify({ reason: reason.value.trim() }),
+            });
+            loadReviews();
+          } catch (error) {
+            note.textContent = (error.rule ? error.rule + " " : "") + error.message;
+            publish.disabled = false;
+            reject.disabled = false;
+          }
+        });
+        actions.append(publish, reject);
+        detail.append(checks, diff, actions, text("label", "退回原因"), reason, note);
+        const files = document.createElement("div");
+        files.className = "group";
+        files.append(text("h2", "制品"));
+        const names = sheetData.files || [];
+        if (!names.length) {
+          files.append(text("p", "没有制品文件。", "diff"));
+        } else {
+          const list = document.createElement("div");
+          list.className = "file-list";
+          const preview = document.createElement("pre");
+          preview.className = "diff-view";
+          names.forEach((name) => {
+            const fileButton = document.createElement("button");
+            fileButton.type = "button";
+            fileButton.className = "btn";
+            fileButton.textContent = name;
+            fileButton.addEventListener("click", () => {
+              const body = (sheetData.files_preview || {})[name];
+              preview.textContent = body == null ? "没有预览。" : body;
+            });
+            list.append(fileButton);
+          });
+          files.append(list, preview);
+        }
+        const fileDiffs = document.createElement("div");
+        fileDiffs.className = "group";
+        fileDiffs.append(text("h2", "制品差异"));
+        const diffs = sheetData.file_diffs || [];
+        if (!diffs.length) fileDiffs.append(text("p", "没有上一份制品，或正文没有变化。", "foot"));
+        diffs.forEach((item) => {
+          fileDiffs.append(text("p", `${item.status}  ${item.path}`, "foot"));
+          fileDiffs.append(renderDiff(item.diff || ""));
+        });
+        detail.append(files, fileDiffs);
+      } catch (error) {
+        detail.replaceChildren(text("p", error.message, "state error"));
+      }
+    }
+
+    const savedTheme = sessionStorage.getItem("qilin-theme");
+    if (savedTheme) {
+      document.documentElement.setAttribute("data-theme", savedTheme);
+      document.getElementById("theme").textContent = savedTheme === "dark" ? "浅色" : "深色";
+    }
+    function openLogin() {
+      setState("login-state", "", false);
+      document.getElementById("login-box").showModal();
+      document.getElementById("login-username").focus();
+    }
+
+    document.getElementById("login-submit").addEventListener("click", async () => {
+      const missing = firstEmpty([
+        ["login-username", "用户名"],
+        ["login-password", "口令"],
+      ]);
+      if (missing) {
+        setState("login-state", missing + "是必填。", true);
+        return;
+      }
+      try {
+        await api("/v1/login", {
+          method: "POST",
+          body: JSON.stringify({
+            username: document.getElementById("login-username").value,
+            password: document.getElementById("login-password").value,
+          }),
+        });
+        document.getElementById("login-password").value = "";
+        document.getElementById("login-box").close();
+        setState("login-state", "", false);
+        state.issued = null;
+        await refreshWho();
+      } catch (error) {
+        setState("login-state", error.message, true);
+      }
+    });
+
+    document.getElementById("reg-password").addEventListener("input", () => markPassword("reg-password", "password-checks"));
+    document.getElementById("reg-username").addEventListener("input", () => markPassword("reg-password", "password-checks"));
+    document.getElementById("new-password").addEventListener("input", () => markPassword("new-password", "new-password-checks"));
+
+    document.getElementById("reg-submit").addEventListener("click", async () => {
+      const required = [
+        ["reg-username", "用户名"],
+        ["reg-real-name", "姓名"],
+        ["reg-nickname", "昵称"],
+        ["reg-password", "口令"],
+        ["reg-password-again", "再输入一次口令"],
+      ];
+      const missing = firstEmpty(required);
+      if (missing) {
+        setState("reg-state", missing + "是必填。", true);
+        return;
+      }
+      const password = document.getElementById("reg-password").value;
+      if (passwordProblems(password, document.getElementById("reg-username").value).length) {
+        setState("reg-state", "口令还没满足上面的规则。", true);
+        markPassword("reg-password", "password-checks");
+        return;
+      }
+      if (password !== document.getElementById("reg-password-again").value) {
+        setState("reg-state", "两次口令不一致。", true);
+        document.getElementById("reg-password-again").setAttribute("aria-invalid", "true");
+        return;
+      }
+      try {
+        const created = await api("/v1/account", {
+          method: "POST",
+          body: JSON.stringify({
+            username: document.getElementById("reg-username").value,
+            real_name: document.getElementById("reg-real-name").value,
+            nickname: document.getElementById("reg-nickname").value,
+            department: document.getElementById("reg-department").value,
+            job_title: document.getElementById("reg-title").value,
+            password,
+            password_again: document.getElementById("reg-password-again").value,
+          }),
+        });
+        state.issued = { key: created.key, mcp: created.mcp };
+        ["reg-password", "reg-password-again"].forEach((id) => { document.getElementById(id).value = ""; });
+        setState("reg-state", "已创建。KEY 在「连接」里，只这一次。", false);
+        await refreshWho();
+        show("connect");
+      } catch (error) {
+        setState("reg-state", error.message, true);
+      }
+    });
+
+    document.getElementById("save-profile").addEventListener("click", async () => {
+      const missing = firstEmpty([
+        ["profile-real-name", "姓名"],
+        ["profile-nickname", "昵称"],
+      ]);
+      if (missing) {
+        setState("profile-state", missing + "是必填。", true);
+        return;
+      }
+      try {
+        await api("/v1/account/profile", {
+          method: "POST",
+          body: JSON.stringify({
+            real_name: document.getElementById("profile-real-name").value,
+            nickname: document.getElementById("profile-nickname").value,
+            department: document.getElementById("profile-department").value,
+            job_title: document.getElementById("profile-title").value,
+          }),
+        });
+        setState("profile-state", "资料已保存。", false);
+        await refreshWho();
+      } catch (error) {
+        setState("profile-state", error.message, true);
+      }
+    });
+
+    document.getElementById("change-password").addEventListener("click", async () => {
+      const next = document.getElementById("new-password").value;
+      const missing = firstEmpty([
+        ["old-password", "原来的口令"],
+        ["new-password", "新口令"],
+        ["new-password-again", "再输入一次新口令"],
+      ]);
+      if (missing) {
+        setState("password-state", missing + "是必填。", true);
+        return;
+      }
+      if (passwordProblems(next, document.getElementById("profile-username").value).length) {
+        setState("password-state", "新口令还没满足上面的规则。", true);
+        markPassword("new-password", "new-password-checks");
+        return;
+      }
+      if (next !== document.getElementById("new-password-again").value) {
+        setState("password-state", "两次新口令不一致。", true);
+        return;
+      }
+      try {
+        await api("/v1/account/password", {
+          method: "POST",
+          body: JSON.stringify({
+            old_password: document.getElementById("old-password").value,
+            new_password: next,
+          }),
+        });
+        ["old-password", "new-password", "new-password-again"].forEach((id) => {
+          document.getElementById(id).value = "";
+        });
+        markPassword("new-password", "new-password-checks");
+        setState("password-state", "口令已修改。商店 MCP 的 KEY 没变。", false);
+      } catch (error) {
+        setState("password-state", error.message, true);
+      }
+    });
+
+    function firstEmpty(pairs) {
+      let missing = "";
+      pairs.forEach(([id, label]) => {
+        const input = document.getElementById(id);
+        const empty = !input.value.trim();
+        input.setAttribute("aria-invalid", empty ? "true" : "false");
+        if (empty && !missing) {
+          missing = label;
+          input.focus();
+        }
+      });
+      return missing;
+    }
+
+    function passwordProblems(value, username) {
+      const problems = [];
+      if (value !== value.trim() || value.length < 10 || value.length > 64) problems.push("len");
+      if (!/[a-z]/.test(value)) problems.push("lower");
+      if (!/[A-Z]/.test(value)) problems.push("upper");
+      if (!/[0-9]/.test(value)) problems.push("digit");
+      if (!username.trim() || value.toLowerCase().includes(username.trim().toLowerCase())) problems.push("user");
+      return problems;
+    }
+
+    function markPassword(inputId, listId) {
+      const value = document.getElementById(inputId).value;
+      const username = inputId === "new-password"
+        ? document.getElementById("profile-username").value
+        : document.getElementById("reg-username").value;
+      const problems = new Set(passwordProblems(value, username));
+      document.querySelectorAll("#" + listId + " li").forEach((item) => {
+        const met = value && !problems.has(item.dataset.rule);
+        item.classList.toggle("met", met);
+        item.classList.toggle("unmet", Boolean(value) && !met);
+      });
+    }
+
+    document.getElementById("copy-snippet").addEventListener("click", async () => {
+      const snippet = document.getElementById("connect-snippet").textContent;
+      try {
+        await navigator.clipboard.writeText(snippet);
+        setState("copy-state", "已复制。贴进 AI 工具的 MCP 设置。", false);
+      } catch {
+        setState("copy-state", "复制没成功。请从上面的配置里手动复制。", true);
+      }
+    });
+
+    document.getElementById("reissue-key").addEventListener("click", async () => {
+      try {
+        const issued = await api("/v1/account/key", { method: "POST", body: "{}" });
+        state.issued = { key: issued.key, mcp: issued.mcp };
+        setState("connect-state", "", false);
+        await refreshWho();
+        renderConnect();
+      } catch (error) {
+        setState("connect-state", error.message, true);
+      }
+    });
+
+    function renderConnect() {
+      const signed = signedIn();
+      document.getElementById("connect-anon").classList.toggle("hidden", signed);
+      const secret = document.getElementById("connect-secret");
+      const later = document.getElementById("connect-later");
+      if (!signed) {
+        secret.classList.add("hidden");
+        later.classList.add("hidden");
+        return;
+      }
+      if (state.issued && state.issued.key) {
+        secret.classList.remove("hidden");
+        later.classList.add("hidden");
+        document.getElementById("connect-key").textContent = state.issued.key;
+        document.getElementById("connect-snippet").textContent = JSON.stringify(state.issued.mcp, null, 2);
+        return;
+      }
+      secret.classList.add("hidden");
+      later.classList.remove("hidden");
+      document.getElementById("connect-url").textContent = state.mcpUrl || "";
+    }
+
+    function clearReset() {
+      const panel = document.getElementById("reset-once");
+      if (!panel) return;
+      panel.classList.add("hidden");
+      document.getElementById("reset-secret").textContent = "";
+      document.getElementById("reset-note").textContent = "";
+    }
+
+    document.getElementById("copy-reset").addEventListener("click", async () => {
+      const secret = document.getElementById("reset-secret").textContent;
+      if (!secret) return;
+      try {
+        await navigator.clipboard.writeText(secret);
+        setState("reset-copy-state", "已复制。请当面交给对方，离开这一页后不再显示。", false);
+      } catch {
+        setState("reset-copy-state", "复制没成功。请从上面手动复制。", true);
+      }
+    });
+
+    async function loadManage() {
+      const rows = document.getElementById("manage-rows");
+      rows.replaceChildren();
+      try {
+        const data = await api("/v1/accounts/manage");
+        const ownerSelect = document.getElementById("namespace-owner");
+        ownerSelect.replaceChildren();
+        (data.items || []).forEach((item) => {
+          ownerSelect.append(new Option(`${item.nickname || item.username} (${item.username})`, item.id));
+        });
+        (data.items || []).forEach((item) => {
+          const tr = document.createElement("tr");
+          tr.append(
+            text("td", item.nickname || item.display_name),
+            text("td", item.real_name || ""),
+            text("td", item.department || ""),
+            text("td", item.job_title || ""),
+            text("td", item.username),
+          );
+          const role = document.createElement("select");
+          role.append(new Option("作者", "publisher"), new Option("审核", "admin"));
+          role.value = item.role;
+          role.addEventListener("change", async () => {
+            try {
+              await api("/v1/accounts/" + encodeURIComponent(item.id) + "/role", {
+                method: "POST",
+                body: JSON.stringify({ role: role.value }),
+              });
+              setState("manage-state", "角色已更新。", false);
+              await refreshWho();
+            } catch (error) {
+              setState("manage-state", error.message, true);
+              role.value = item.role;
+            }
+          });
+          const roleCell = document.createElement("td");
+          roleCell.append(role);
+          const action = document.createElement("td");
+          if (item.id !== state.userId) {
+            const reset = text("button", "重置口令", "btn");
+            reset.type = "button";
+            reset.addEventListener("click", async () => {
+              if (reset.textContent !== "确认重置") {
+                reset.textContent = "确认重置";
+                return;
+              }
+              try {
+                const issued = await api("/v1/accounts/" + encodeURIComponent(item.id) + "/password", {
+                  method: "POST",
+                  body: "{}",
+                });
+                const panel = document.getElementById("reset-once");
+                panel.classList.remove("hidden");
+                document.getElementById("reset-note").textContent =
+                  "已为 " + (issued.nickname || issued.username) + " 生成新口令。只出现这一次。原来的口令立即失效，商店 MCP 的 KEY 没变。";
+                document.getElementById("reset-secret").textContent = issued.password;
+                setState("reset-copy-state", "", false);
+                reset.textContent = "重置口令";
+              } catch (error) {
+                setState("manage-state", error.message, true);
+                reset.textContent = "重置口令";
+              }
+            });
+            action.append(reset);
+          }
+          if (!item.disabled) {
+            const stop = text("button", "停用", "btn");
+            stop.type = "button";
+            stop.addEventListener("click", async () => {
+              try {
+                await api("/v1/accounts/" + encodeURIComponent(item.id) + "/disable", { method: "POST", body: "{}" });
+                await loadManage();
+              } catch (error) {
+                setState("manage-state", error.message, true);
+              }
+            });
+            action.append(stop);
+          } else {
+            action.append(text("span", "已停用", "foot"));
+          }
+          tr.append(roleCell, action);
+          rows.append(tr);
+        });
+        setState("manage-state", "", false);
+      } catch (error) {
+        setState("manage-state", error.message, true);
+      }
+    }
+
+    refreshWho().then(() => { loadIdentity(); loadCatalog("shelf"); });
+  </script>
+</body>
+</html>

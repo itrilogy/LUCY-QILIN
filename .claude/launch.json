@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "qilin",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "store.cli", "serve", "--db", "var/qilin.db", "--blobs", "var/blobs", "--port", "8787"],
+      "port": 8787
+    }
+  ]
+}

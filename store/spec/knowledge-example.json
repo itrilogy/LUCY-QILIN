@@ -1,0 +1,38 @@
+{
+  "description": "最小合格知识包。商店 MCP 的 qilin://example/knowledge 直接返回本文件；把 files 写进一个目录、把 manifest 写成 manifest.json，就能通过 store validate。",
+  "manifest": {
+    "spec_version": 1,
+    "id": "luxi.knowledge-example",
+    "version": "1.0.0",
+    "kind": "knowledge",
+    "title": "知识包最小样例",
+    "summary": "三篇笔记演示入口、指南与参考的写法。",
+    "description": "这是一份最小合格知识包。它只讲三件事：入口怎么组织、指南怎么写、参考怎么标注来源。它不讨论具体的业务内容，也不引用包外的任何笔记。",
+    "author": { "display_name": "鹿溪" },
+    "platforms": ["any"],
+    "changes": "首个发布",
+    "clients": ["reasonix"],
+    "depends": { "store": [], "external": [], "skills": [], "mcp": [] },
+    "secrets": [],
+    "knowledge": {
+      "entry": "00-导航概览.md",
+      "taxonomy": {
+        "business_category": "knowledge-ops",
+        "business_domain": "method",
+        "knowledge_kind": "guide"
+      },
+      "security_level": "internal",
+      "scope": "work",
+      "vocabulary": "kv/1",
+      "language": "zh-CN",
+      "license": "internal",
+      "producer": "人工"
+    },
+    "invoke": { "form": "read_notes", "entry": "00-导航概览.md" }
+  },
+  "files": {
+    "00-导航概览.md": "---\ntype: map_of_content\nstatus: evergreen\ncreated: 2026-11-16\nupdated: 2026-11-16\ntags:\n  - topic/knowledge-management\nsummary: 三篇笔记的入口，说明读的顺序。\n---\n\n# 导航概览\n\n这个包只回答一个问题：一份知识包的最小合格形态是什么。\n\n## 阅读顺序\n\n1. [[01-知识包是什么]]：先看边界与产出。\n2. [[02-词表怎么用]]：再看分类、标签与密级怎么写。\n",
+    "01-知识包是什么.md": "---\ntype: guide_note\nstatus: evergreen\ncreated: 2026-11-16\nupdated: 2026-11-16\ntags:\n  - topic/knowledge-management\n  - method/zettelkasten\nsummary: 知识包是一组能自己闭合的笔记，不是整个笔记库。\nprerequisite: 无\n---\n\n# 知识包是什么\n\n知识包是一组能自己闭合的笔记。它有唯一的入口、平铺的文件、可解析的题头，以及只在包内闭合的链接。\n\n它不要求你搬空笔记库，也不判断文章写得好不好。它只回答：这组笔记能不能被另一台机器按同一套规则读懂。\n\n回到 [[00-导航概览]]。\n",
+    "02-词表怎么用.md": "---\ntype: reference_note\nstatus: seedling\ncreated: 2026-11-16\nupdated: 2026-11-16\ntags:\n  - topic/knowledge-management\n  - topic/terminology\n  - source/internal-document\nsummary: 分类、标签、密级各自回答什么问题。\nsource: 栖林商店知识包协议 kv/1\n---\n\n# 词表怎么用\n\n三个面各回答一个问题：\n\n- `taxonomy` 回答「属于哪条业务线」。三段都来自 `qilin://vocab/knowledge`。\n- `type` 回答「这是什么形态」。只有五种：参考、指南、教程、反思、导航。\n- `tags` 回答「涉及什么」。至少一个 `topic/`，方法词与来源词是封闭的。\n\n密级是声明，不是访问控制：`security_level` 写在包上，篇级不能高于它。\n\n回到 [[00-导航概览]]。\n"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://luxi.local/store-spec/1/manifest.schema.json",
+  "title": "栖林上架单",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "spec_version",
+    "id",
+    "version",
+    "kind",
+    "title",
+    "summary",
+    "description",
+    "author",
+    "platforms",
+    "changes",
+    "clients",
+    "depends",
+    "secrets",
+    "invoke"
+  ],
+  "properties": {
+    "spec_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*)+$" },
+    "version": { "type": "string" },
+    "kind": { "enum": ["mcp", "skill", "mcp+skill", "runtime", "knowledge"] },
+    "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string", "minLength": 40 },
+    "changes": { "type": "string", "minLength": 1 },
+    "author": {
+      "type": "object",
+      "required": ["display_name"],
+      "properties": { "display_name": { "type": "string", "minLength": 1 } }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "darwin-arm64",
+          "darwin-amd64",
+          "linux-arm64",
+          "linux-amd64",
+          "windows-arm64",
+          "windows-amd64",
+          "any"
+        ]
+      }
+    },
+    "clients": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "depends": {
+      "type": "object",
+      "required": ["store", "external", "skills", "mcp"],
+      "properties": {
+        "store": { "type": "array" },
+        "external": { "type": "array" },
+        "skills": { "type": "array" },
+        "mcp": { "type": "array" }
+      }
+    },
+    "secrets": { "type": "array" },
+    "invoke": { "type": "object" },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "entry": { "type": "string" },
+        "taxonomy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "business_category": { "type": "string" },
+            "business_domain": { "type": "string" },
+            "knowledge_kind": { "type": "string" }
+          }
+        },
+        "knowledge_map": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}

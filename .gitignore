@@ -1,0 +1,29 @@
+# 运行时数据：真实账号、会话、制品。不进版本库。
+var/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python 构建与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# 密钥与枢纽公钥缓存
+.env
+.env.*
+!.env.example
+jwks-cache.json
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://luxi.local/store-spec/kv/1/note.schema.json",
+  "title": "栖林知识包笔记题头",
+  "description": "每篇笔记开头 YAML 题头的机器可读契约。字段取值与 store/spec/knowledge-vocabulary.json 的 kv/1 对齐。题头之外的正文不在这里约束。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "status", "created", "updated", "tags"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "maxLength": 80,
+      "description": "给人看的标题。省略时取文件名去掉序号前缀。"
+    },
+    "type": {
+      "enum": ["reference_note", "guide_note", "tutorial_note", "reflection_note", "map_of_content"],
+      "description": "知识形态。对应词表 kinds.note_type。"
+    },
+    "status": {
+      "enum": ["evergreen", "seedling"],
+      "description": "evergreen 表示内容已稳定；seedling 表示还会大改。"
+    },
+    "created": { "type": "string", "format": "date" },
+    "updated": { "type": "string", "format": "date" },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "pattern": "^(topic|entity|method|source)/[a-z0-9\\u4e00-\\u9fff]+(-[a-z0-9\\u4e00-\\u9fff]+)*$"
+      },
+      "description": "带命名空间的标签；至少一个 topic/。"
+    },
+    "aliases": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "type": "string", "maxLength": 64 },
+      "description": "只用于搜索与显示，不能作为 [[链接]] 的目标。"
+    },
+    "prerequisite": {
+      "oneOf": [
+        { "const": "无" },
+        { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 120 } }
+      ],
+      "description": "写成数组；没有前置时写「无」。数组项是篇名，不带 .md。"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "一句话摘要，供检索与导航。"
+    },
+    "security_level": {
+      "enum": ["public", "internal", "restricted", "confidential"],
+      "description": "不能高于知识包声明级别；省略时继承包级。"
+    },
+    "domain": {
+      "type": "string",
+      "description": "可选。覆盖知识包的 business_domain，必须在词表内。"
+    },
+    "knowledge_kind": {
+      "enum": ["reference", "guide", "tutorial", "reflection", "moc"],
+      "description": "可选。与 type 对应；写了就必须一致。"
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "外部来源的标题、文号或 https 地址。不写凭据与查询串令牌。"
+    }
+  }
+}

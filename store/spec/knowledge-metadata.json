@@ -1,0 +1,381 @@
+{
+  "version": "kv/1",
+  "status": "draft",
+  "updated": "2026-11-16",
+  "title": "栖林知识包元数据词典",
+  "description": "知识包、笔记与「知识技能」的字段字典。字段名、类型、必填性与取值以本文件为准；与 knowledge-vocabulary.json、knowledge-tags.json 交叉引用。",
+  "pack": {
+    "note": "上架清单 manifest.json 中与知识包相关的字段。通用字段（id/version/title/summary/description/changes/author）沿用规格第 4.1 节。",
+    "fields": [
+      {
+        "name": "kind",
+        "type": "const",
+        "required": true,
+        "value": "knowledge",
+        "semantics": "知识包类型。"
+      },
+      {
+        "name": "knowledge.entry",
+        "type": "string",
+        "required": true,
+        "pattern": "^00-[^/]+\\.md$",
+        "semantics": "入口篇，必须是根上的 00-*.md，且 type=map_of_content。"
+      },
+      {
+        "name": "knowledge.taxonomy.business_category",
+        "type": "vocab",
+        "required": true,
+        "vocab": "categories",
+        "semantics": "业务类目。"
+      },
+      {
+        "name": "knowledge.taxonomy.business_domain",
+        "type": "vocab",
+        "required": true,
+        "vocab": "domains",
+        "semantics": "业务领域，必须属于所选类目。"
+      },
+      {
+        "name": "knowledge.taxonomy.knowledge_kind",
+        "type": "vocab",
+        "required": true,
+        "vocab": "kinds",
+        "semantics": "包的默认知识形态。"
+      },
+      {
+        "name": "knowledge.security_level",
+        "type": "vocab",
+        "required": true,
+        "vocab": "security_levels",
+        "default": "internal",
+        "semantics": "包的最高密级；篇级不得高于它。"
+      },
+      {
+        "name": "knowledge.vocabulary",
+        "type": "string",
+        "required": false,
+        "pattern": "^kv/[0-9]+(\\.[0-9]+)?$",
+        "default": "kv/1",
+        "semantics": "本包依据的词表版本。"
+      },
+      {
+        "name": "knowledge.scope",
+        "type": "vocab",
+        "required": true,
+        "vocab": "scopes",
+        "default": "enterprise",
+        "semantics": "企业知识或工作产出；决定默认货架与审核口径。"
+      },
+      {
+        "name": "knowledge.language",
+        "type": "enum",
+        "required": false,
+        "values": [
+          "zh-CN",
+          "en",
+          "bilingual"
+        ],
+        "default": "zh-CN",
+        "semantics": "笔记主体语言。"
+      },
+      {
+        "name": "knowledge.license",
+        "type": "enum",
+        "required": false,
+        "values": [
+          "internal",
+          "cc-by",
+          "cc-by-sa",
+          "all-rights-reserved"
+        ],
+        "default": "internal",
+        "semantics": "再分发许可。"
+      },
+      {
+        "name": "knowledge.producer",
+        "type": "string",
+        "required": false,
+        "max": 120,
+        "semantics": "可选的生产溯源：技能 id、工具名或「人工」。只用于显示与排障，不参与校验，也不授予任何权限。"
+      },
+      {
+        "name": "knowledge.topics",
+        "type": "array",
+        "required": false,
+        "max": 10,
+        "semantics": "包内自定义主题词，审核时可提升为全局词；每项须符合 topic 段的 slug 规则。"
+      },
+      {
+        "name": "knowledge.knowledge_map",
+        "type": "object",
+        "required": false,
+        "semantics": "可选的概念图；节点必须指向包内笔记。"
+      },
+      {
+        "name": "platforms",
+        "type": "array",
+        "required": true,
+        "value": [
+          "any"
+        ],
+        "semantics": "知识包不区分平台。"
+      },
+      {
+        "name": "depends",
+        "type": "object",
+        "required": true,
+        "semantics": "四项都必须是空数组。"
+      },
+      {
+        "name": "secrets",
+        "type": "array",
+        "required": true,
+        "value": [],
+        "semantics": "知识包不声明密钥。"
+      },
+      {
+        "name": "invoke.form",
+        "type": "const",
+        "required": true,
+        "value": "read_notes",
+        "semantics": "知识包的调用形式。"
+      },
+      {
+        "name": "meta.tags",
+        "type": "array",
+        "required": false,
+        "max": 12,
+        "semantics": "包级标签，取自 knowledge-tags.json；用于货架检索。"
+      }
+    ]
+  },
+  "note": {
+    "note": "每篇笔记开头的 YAML 题头。机器可读 schema 在 knowledge-note.schema.json。",
+    "fields": [
+      {
+        "name": "type",
+        "type": "vocab",
+        "required": true,
+        "vocab": "kinds.note_type",
+        "semantics": "知识形态。"
+      },
+      {
+        "name": "status",
+        "type": "enum",
+        "required": true,
+        "values": [
+          "evergreen",
+          "seedling"
+        ],
+        "semantics": "内容稳定性。"
+      },
+      {
+        "name": "created",
+        "type": "date",
+        "required": true,
+        "semantics": "首次创建日期，YYYY-MM-DD。"
+      },
+      {
+        "name": "updated",
+        "type": "date",
+        "required": true,
+        "semantics": "最后更新日期，不得早于 created。"
+      },
+      {
+        "name": "tags",
+        "type": "array",
+        "required": true,
+        "min": 1,
+        "max": 12,
+        "semantics": "至少一个 topic/；见 knowledge-tags.json。"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "required": false,
+        "max": 80,
+        "semantics": "显示标题；省略时取文件名去掉序号前缀。"
+      },
+      {
+        "name": "aliases",
+        "type": "array",
+        "required": false,
+        "max": 8,
+        "semantics": "只用于检索与显示，不能作为链接目标。"
+      },
+      {
+        "name": "prerequisite",
+        "type": "array|const",
+        "required": false,
+        "semantics": "数组或「无」；数组项是篇名，不带 .md。"
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "required": false,
+        "max": 200,
+        "semantics": "一句话摘要。"
+      },
+      {
+        "name": "security_level",
+        "type": "vocab",
+        "required": false,
+        "vocab": "security_levels",
+        "semantics": "不得高于包级；省略时继承。"
+      },
+      {
+        "name": "domain",
+        "type": "vocab",
+        "required": false,
+        "vocab": "domains",
+        "semantics": "覆盖包级 business_domain，必须在同一类目下。"
+      },
+      {
+        "name": "knowledge_kind",
+        "type": "vocab",
+        "required": false,
+        "vocab": "kinds",
+        "semantics": "覆盖包级知识形态；必须与 type 对应。"
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "required": false,
+        "max": 500,
+        "semantics": "来源标题、文号或 https 地址；不写凭据与令牌。"
+      }
+    ]
+  },
+  "workflow": {
+    "id": "knowledge-pack-authoring",
+    "name": "知识包生产",
+    "description": "商店 MCP 下发的生产流程。技能与人都按这个顺序做；商店只验收产物，不运行流程。",
+    "forbidden": [
+      "把密钥、口令、令牌写进笔记或清单",
+      "引用包外笔记或网络图片",
+      "使用子目录",
+      "在没有跑本地校验的情况下提交",
+      "手改已发布版本"
+    ],
+    "stages": [
+      {
+        "id": "scope",
+        "name": "定题与边界",
+        "outputs": [
+          "一句话主题",
+          "包范围"
+        ],
+        "checks": [
+          "单一主题",
+          "10–30 篇",
+          "能说清不包含什么"
+        ]
+      },
+      {
+        "id": "collect",
+        "name": "采集与清洗",
+        "outputs": [
+          "素材清单"
+        ],
+        "checks": [
+          "来源可标注",
+          "去重",
+          "剔除密钥与个人隐私"
+        ]
+      },
+      {
+        "id": "decompose",
+        "name": "原子化拆解",
+        "outputs": [
+          "概念清单"
+        ],
+        "checks": [
+          "一篇一件事",
+          "概念可命名"
+        ]
+      },
+      {
+        "id": "cluster",
+        "name": "语义聚类",
+        "outputs": [
+          "主题簇"
+        ],
+        "checks": [
+          "簇内聚",
+          "簇间有桥接"
+        ]
+      },
+      {
+        "id": "outline",
+        "name": "导航与结构",
+        "outputs": [
+          "00-导航概览.md"
+        ],
+        "checks": [
+          "入口覆盖所有板块",
+          "阅读路径清晰"
+        ]
+      },
+      {
+        "id": "write",
+        "name": "逐篇撰写",
+        "outputs": [
+          "NN-*.md"
+        ],
+        "checks": [
+          "题头完整",
+          "摘要一句话"
+        ]
+      },
+      {
+        "id": "link",
+        "name": "双链与锚点",
+        "outputs": [
+          "链接清单"
+        ],
+        "checks": [
+          "无断链",
+          "锚点存在",
+          "无孤篇（入口除外）"
+        ]
+      },
+      {
+        "id": "validate",
+        "name": "本地校验",
+        "outputs": [
+          "store validate 报告"
+        ],
+        "checks": [
+          "没有 error",
+          "词表命中",
+          "密级不越级"
+        ]
+      },
+      {
+        "id": "package",
+        "name": "清单与打包",
+        "outputs": [
+          "manifest.json",
+          "zip"
+        ],
+        "checks": [
+          "taxonomy 三段齐全",
+          "entry 正确",
+          "大小上限"
+        ]
+      },
+      {
+        "id": "submit",
+        "name": "提交审核",
+        "outputs": [
+          "submission_id"
+        ],
+        "checks": [
+          "pending",
+          "钥匙不进输出"
+        ]
+      }
+    ]
+  },
+  "producer_note": "知识包可以由任何技能、任何工具或人工生产。协议只约束产物，不登记生产者；需要溯源时用 knowledge.producer，它不参与校验。商店里的 kind=skill 商品另有一套清单，与本协议无关。"
+}

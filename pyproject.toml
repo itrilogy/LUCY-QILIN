@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qilin-store"
+version = "0.1.0"
+description = "栖林商店校验器。清单规则与 agent-store-design.md 一致。"
+requires-python = ">=3.11"
+# 基础安装只用标准库。枢纽验签需要 cryptography，装在 hub extra 里。
+dependencies = []
+
+[project.optional-dependencies]
+hub = ["cryptography>=42"]
+
+[project.scripts]
+store = "store.cli:main"
+store-install = "store.installer:main"
+
+[tool.setuptools.packages.find]
+include = ["store*"]
+
+[tool.setuptools.package-data]
+store = [
+  "portal/index.html",
+  "portal/assets/*",
+  "spec/*.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# 只查语法错误与未定义名字。样式另开一轮，先让 CI 能拦住 NameError 这类问题。
+select = ["E9", "F821"]
