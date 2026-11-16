@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Qilin store MCP",
+    "description": "Connects to the local Qilin store MCP: catalog search, install plans, and authoring specs.",
+    "detail": "docs/DETAIL.md"
+  }
+}

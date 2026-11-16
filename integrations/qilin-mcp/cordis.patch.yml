@@ -1,0 +1,8 @@
+- insert:
+    - id: mcp-qilin
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: qilin
+        transport: streamable-http
+        url: http://127.0.0.1:8787/mcp
+        failOnStartupError: true
