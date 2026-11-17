@@ -188,7 +188,7 @@ class PortalEntryTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.page = PORTAL.read_text(encoding="utf-8")
+        self.page = PORTAL.read_text(encoding="utf-8") + (PORTAL.parent / "app.js").read_text(encoding="utf-8")
 
     def test_button_starts_hidden(self) -> None:
         self.assertIn('id="hub-login"', self.page)

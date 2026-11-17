@@ -33,17 +33,22 @@ class SearchPageTests(unittest.TestCase):
             self.store.approve(self.admin, result.submission_id)
 
     def test_page_has_total_and_stable_order(self) -> None:
-        first = self.store.search_page(limit=2)
+        first = self.store.search_page(limit=2, sort="id")
         self.assertEqual(first["total"], 5)
         self.assertEqual(first["limit"], 2)
         self.assertEqual(len(first["items"]), 2)
         ids = [item["id"] for item in first["items"]]
         self.assertEqual(ids, sorted(ids))
-        second = self.store.search_page(limit=2, offset=2)
+        second = self.store.search_page(limit=2, offset=2, sort="id")
         self.assertEqual(len(second["items"]), 2)
         self.assertFalse(set(ids) & {item["id"] for item in second["items"]})
-        tail = self.store.search_page(limit=2, offset=4)
+        tail = self.store.search_page(limit=2, offset=4, sort="id")
         self.assertEqual(len(tail["items"]), 1)
+
+    def test_sort_by_title(self) -> None:
+        page = self.store.search_page(sort="title", limit=5)
+        self.assertEqual(page["total"], 5)
+        self.assertEqual([item["id"] for item in page["items"]], sorted(item["id"] for item in page["items"]))
 
     def test_search_list_stays_compatible(self) -> None:
         self.assertEqual(len(self.store.search()), 5)
@@ -55,7 +60,7 @@ class SearchPageTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         self.addCleanup(server.server_close)
         base = f"http://127.0.0.1:{server.server_port}"
-        with urllib.request.urlopen(base + "/v1/catalog?limit=2&offset=2") as response:
+        with urllib.request.urlopen(base + "/v1/catalog?limit=2&offset=2&sort=id") as response:
             page = json.load(response)
         self.assertEqual(page["total"], 5)
         self.assertEqual(len(page["items"]), 2)
@@ -65,7 +70,7 @@ class SearchPageTests(unittest.TestCase):
         response = handle(
             self.store, "",
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": "search", "arguments": {"limit": 1, "offset": 1}}},
+             "params": {"name": "search", "arguments": {"limit": 1, "offset": 1, "sort": "id"}}},
             base_url="http://127.0.0.1:8787",
         )
         payload = json.loads(response["result"]["content"][0]["text"])

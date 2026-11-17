@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sqlite3
 from pathlib import Path
@@ -200,12 +202,13 @@ class CatalogMixin:
         platform: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        sort: str = "updated",
     ) -> dict:
         """分页的货架查询，走 `catalog_index`，不再解析全量清单。"""
         with self._read():
             start = max(0, int(offset))
             result = self._search(
-                query, kind=kind, client=client, platform=platform, limit=limit, offset=start,
+                query, kind=kind, client=client, platform=platform, limit=limit, offset=start, sort=sort,
             )
             return {
                 "items": result["items"],
@@ -223,6 +226,7 @@ class CatalogMixin:
         platform: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        sort: str = "updated",
     ) -> dict:
         clauses = ["1=1"]
         params: list[object] = []
@@ -258,10 +262,17 @@ class CatalogMixin:
             "SELECT COUNT(*) FROM catalog_index WHERE " + where, tuple(params)
         ).fetchone()[0]
         size = -1 if limit is None else max(0, int(limit))
+        order = {
+            "updated": "updated_at DESC, package_id ASC",
+            "title": "title COLLATE NOCASE ASC, package_id ASC",
+            "id": "package_id ASC",
+        }.get(sort, "updated_at DESC, package_id ASC")
         rows = self._db.execute(
             "SELECT package_id, version, manifest_json FROM catalog_index WHERE "
             + where
-            + " ORDER BY package_id LIMIT ? OFFSET ?",
+            + " ORDER BY "
+            + order
+            + " LIMIT ? OFFSET ?",
             tuple(params) + (size, max(0, int(offset))),
         ).fetchall()
         return {"items": [_public(row) for row in rows], "total": int(total)}
@@ -407,6 +418,50 @@ class CatalogMixin:
                 "limit": limit,
                 "offset": offset,
             }
+
+    def audit_csv(
+        self,
+        token: str,
+        *,
+        package_id: str | None = None,
+        action: str | None = None,
+    ) -> str:
+        """审计导出。只给 admin；最多一万条，避免一次拉爆。"""
+        with self._read():
+            self._require(token, {"admin"})
+            clauses: list[str] = []
+            params: list[object] = []
+            if package_id:
+                clauses.append("a.package_id = ?")
+                params.append(package_id)
+            if action:
+                clauses.append("a.action = ?")
+                params.append(action)
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = self._db.execute(
+                """
+                SELECT a.id, a.actor,
+                       COALESCE(acc.nickname, acc.display_name, p.name, a.actor) AS actor_name,
+                       a.action, a.package_id, a.version, a.channel, a.at
+                FROM audit a
+                LEFT JOIN accounts acc ON acc.id = a.actor
+                LEFT JOIN principals p ON p.id = a.actor
+                """
+                + where
+                + " ORDER BY a.id DESC LIMIT 10000",
+                tuple(params),
+            ).fetchall()
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["id", "actor", "actor_name", "action", "package_id", "version", "channel", "at"])
+        for row in rows:
+            values = [row[key] for key in ("id", "actor", "actor_name", "action", "package_id", "version", "channel", "at")]
+            # CSV 公式注入：以 = + - @ 开头的单元格前面加单引号。
+            writer.writerow([
+                ("'" + str(value)) if isinstance(value, str) and value[:1] in "=+-@" else value
+                for value in values
+            ])
+        return buffer.getvalue()
 
     def get_review(self, token: str, submission_id: str) -> dict:
         with self._read():

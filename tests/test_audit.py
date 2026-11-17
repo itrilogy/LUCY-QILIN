@@ -63,6 +63,18 @@ class AuditReadTests(unittest.TestCase):
         self.assertTrue(all(item["package_id"] == "luxi.audit-a" for item in page["items"]))
         self.assertEqual(self.store.list_audit(self.admin, action="nope")["total"], 0)
 
+    def test_csv_export_and_permissions(self) -> None:
+        self._submit()
+        text = self.store.audit_csv(self.admin)
+        self.assertIn("actor_name", text.splitlines()[0])
+        self.assertIn("submit", text)
+        filtered = self.store.audit_csv(self.admin, action="submit")
+        self.assertIn("submit", filtered)
+        self.assertNotIn("approve", filtered)
+        with self.assertRaises(StoreError) as caught:
+            self.store.audit_csv(self.publisher)
+        self.assertEqual(caught.exception.rule, "ROLE_FORBIDDEN")
+
     def test_pagination_and_cap(self) -> None:
         for index in range(3):
             self._submit(f"luxi.audit-{index}")
@@ -95,6 +107,21 @@ class AuditHttpTests(unittest.TestCase):
         request.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(request) as response:
             return json.load(response)
+
+    def test_csv_endpoint(self) -> None:
+        self.store.submit(self.publisher, skill_manifest(), {"SKILL.md": SKILL.encode()})
+        request = urllib.request.Request(self.base + "/v1/audit.csv")
+        request.add_header("Authorization", f"Bearer {self.admin}")
+        with urllib.request.urlopen(request) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/csv", response.headers["Content-Type"])
+            self.assertIn("submit", response.read().decode())
+        bad = urllib.request.Request(self.base + "/v1/audit.csv")
+        bad.add_header("Authorization", f"Bearer {self.publisher}")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(bad)
+        self.assertEqual(caught.exception.code, 403)
+        caught.exception.close()
 
     def test_admin_reads_and_publisher_is_denied(self) -> None:
         self.store.submit(self.publisher, skill_manifest(), {"SKILL.md": SKILL.encode()})

@@ -29,12 +29,20 @@ DESIGN_FILES = {
     "/design/tokens.css": PORTAL_DIR / "assets" / "tokens.css",
     "/design/qilin.svg": PORTAL_DIR / "assets" / "qilin.svg",
     "/design/luxi-lab-gold.svg": PORTAL_DIR / "assets" / "luxi-lab-gold.svg",
+    "/portal/styles.css": PORTAL_DIR / "styles.css",
+    "/portal/app.js": PORTAL_DIR / "app.js",
 }
 TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
     ".svg": "image/svg+xml",
 }
+CSP = (
+    "default-src 'self'; base-uri 'none'; object-src 'none'; "
+    "script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'"
+)
 # 跳转登录的一次性 state。存 Cookie，不进地址栏以外的任何响应体。
 # 名称带 hub 前缀，与会话 Cookie 分开，免得登出时一起被清掉。
 _STATE_COOKIE = "qilin_hub_state"
@@ -143,11 +151,20 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                         client=_one(query, "client") or None,
                         platform=_one(query, "platform") or None,
                         limit=int(_one(query, "limit")) if _one(query, "limit") else None,
+                        sort=_one(query, "sort") or "updated",
                         offset=int(_one(query, "offset") or 0),
                     ))
                     return
                 if path == "/v1/mine":
                     self._send(200, {"items": store.list_my_submissions(token)})
+                    return
+                if path == "/v1/audit.csv":
+                    text = store.audit_csv(
+                        token,
+                        package_id=_one(query, "package_id") or None,
+                        action=_one(query, "action") or None,
+                    )
+                    self._csv(text, "qilin-audit.csv")
                     return
                 if path == "/v1/audit":
                     self._send(200, store.list_audit(
@@ -452,6 +469,15 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(payload)
 
+        def _csv(self, text: str, filename: str) -> None:
+            payload = text.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            self.wfile.write(payload)
+
         def _file(self, path: Path) -> None:
             if not path.is_file():
                 self._send(404, {"rule": "VERSION_UNAVAILABLE", "message": "没有这个文件"})
@@ -460,6 +486,10 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Type", TYPES.get(path.suffix, "application/octet-stream"))
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            if path.suffix == ".html":
+                self.send_header("Content-Security-Policy", CSP)
             self.end_headers()
             self.wfile.write(payload)
 

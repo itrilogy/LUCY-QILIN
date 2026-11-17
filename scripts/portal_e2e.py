@@ -129,7 +129,7 @@ def main() -> int:
             page.fill("#login-username", REVIEWER["username"])
             page.fill("#login-password", REVIEWER["password"])
             page.click("#login-submit")
-            page.wait_for_function("document.querySelector('#who').textContent.includes('审核')")
+            page.locator("#who").filter(has_text="审核").wait_for()
             page.click("#new-product")
             page.select_option("#f-kind", "plugin")
             assert page.locator("#plugin-fields").is_visible()
@@ -153,10 +153,10 @@ def main() -> int:
             for index in range(8):
                 page.locator("#review-detail input[type='checkbox']").nth(index).check()
             page.get_by_role("button", name="记录审核").click()
-            page.wait_for_function("document.body.innerText.includes('已记录审核清单')")
+            page.get_by_text("已记录审核清单").wait_for()
             page.fill("#review-detail textarea", "E2E 验证完成，退回清理。")
             page.get_by_role("button", name="退回").click()
-            page.wait_for_function("document.querySelector('#review-state').textContent.includes('没有待审核')")
+            page.locator("#review-state").filter(has_text="没有待审核").wait_for()
             browser.close()
         print("portal e2e: ok")
         return 0

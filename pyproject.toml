@@ -23,6 +23,8 @@ include = ["store*"]
 [tool.setuptools.package-data]
 store = [
   "portal/index.html",
+  "portal/styles.css",
+  "portal/app.js",
   "portal/assets/*",
   "spec/*.json",
 ]
