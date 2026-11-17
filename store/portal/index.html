@@ -263,7 +263,7 @@
         <button type="button" data-view="shelf" aria-current="page">货架</button>
         <button type="button" data-view="runtime">运行时</button>
         <button type="button" data-view="mine">我的提交</button>
-        <button type="button" data-view="review">审核</button>
+        <button type="button" data-view="review" id="nav-review" class="hidden">审核</button>
         <button type="button" data-view="audit" id="nav-audit" class="hidden">审计</button>
         <button type="button" data-view="users">用户</button>
         <button type="button" data-view="admin-users">用户管理</button>
@@ -726,6 +726,7 @@
 
     function show(id) {
       document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === id));
+      if (id !== "detail") saveHash("#" + id);
       document.querySelectorAll(".nav button").forEach((button) => {
         button.setAttribute("aria-current", button.dataset.view === id ? "page" : "false");
       });
@@ -776,6 +777,17 @@
       node.classList.toggle("error", Boolean(isError));
     }
 
+    function setStateAction(id, message, label, handler, isError) {
+      const node = document.getElementById(id);
+      node.replaceChildren(text("span", message));
+      node.classList.toggle("error", Boolean(isError));
+      if (!label) return;
+      const button = text("button", label, "btn");
+      button.type = "button";
+      button.addEventListener("click", handler);
+      node.append(" ", button);
+    }
+
     async function refreshWho() {
       const who = document.getElementById("who");
       try {
@@ -793,6 +805,7 @@
         board.classList.toggle("hidden", me.role !== "admin");
         gate.classList.toggle("hidden", me.role === "admin");
         document.getElementById("nav-audit").classList.toggle("hidden", me.role !== "admin");
+        document.getElementById("nav-review").classList.toggle("hidden", me.role !== "admin");
         if (me.role === "publisher") gate.textContent = "作者不能管理用户。";
         if (!named) gate.textContent = "先用审核的口令登录。";
         if (me.username) {
@@ -852,6 +865,33 @@
       sessionStorage.setItem("qilin-theme", next);
     });
 
+    function setShelfKind(kind) {
+      state.shelfKind = kind || "";
+      document.querySelectorAll("#kind-chips button").forEach((item) => {
+        item.setAttribute("aria-pressed", item.dataset.kind === state.shelfKind ? "true" : "false");
+      });
+    }
+
+    function saveHash(value) {
+      if (location.hash !== value) history.replaceState(null, "", value);
+    }
+
+    function applyHash() {
+      const raw = decodeURIComponent(location.hash.slice(1));
+      if (!raw) { show("shelf"); return; }
+      const [path, query] = raw.split("?");
+      if (path.startsWith("detail/")) {
+        openDetail(decodeURIComponent(path.slice("detail/".length)), false);
+        return;
+      }
+      if (path === "shelf" && query) {
+        const params = new URLSearchParams(query);
+        setShelfKind(params.get("kind") || "");
+        document.getElementById("query").value = params.get("q") || "";
+      }
+      show(path || "shelf");
+    }
+
     function card(item, shelf) {
       const article = document.createElement("article");
       article.className = "card goods";
@@ -895,15 +935,29 @@
       try {
         const data = await api("/v1/catalog" + (params.toString() ? "?" + params : ""));
         const items = data.items || [];
+        if (which === "shelf") {
+          const hashParams = new URLSearchParams();
+          if (kind) hashParams.set("kind", kind);
+          if (query) hashParams.set("q", query);
+          saveHash("#shelf" + (hashParams.toString() ? "?" + hashParams.toString() : ""));
+        }
         if (!items.length) {
-          setState(stateId, which === "runtime" ? "还没有已发布的运行时。" : "货架上还没有这类已发布的产品。", false);
+          if (which === "shelf") {
+            setStateAction(stateId, "货架上还没有这类已发布的产品。", "清空筛选", () => {
+              document.getElementById("query").value = "";
+              setShelfKind("");
+              loadCatalog("shelf");
+            });
+          } else {
+            setState(stateId, "还没有已发布的运行时。", false);
+          }
           return;
         }
         setState(stateId, "", false);
         if (count && which === "shelf") count.textContent = `在架 ${Number.isFinite(data.total) ? data.total : items.length}`;
         items.forEach((item) => grid.append(card(item, which)));
       } catch (error) {
-        setState(stateId, error.message, true);
+        setStateAction(stateId, error.message, "重试", () => loadCatalog(which), true);
       }
     }
 
@@ -917,15 +971,13 @@
     document.getElementById("kind-chips").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-kind]");
       if (!button) return;
-      state.shelfKind = button.dataset.kind;
-      document.querySelectorAll("#kind-chips button").forEach((item) => {
-        item.setAttribute("aria-pressed", item === button ? "true" : "false");
-      });
+      setShelfKind(button.dataset.kind);
       loadCatalog("shelf");
     });
 
     async function openDetail(packageId, isRuntime) {
       state.packageId = packageId;
+      saveHash("#detail/" + encodeURIComponent(packageId));
       state.kind = isRuntime ? "runtime" : "skill";
       show("detail");
       document.getElementById("detail-sheet").replaceChildren(text("p", "正在读取。", "state"));
@@ -2302,7 +2354,7 @@
       }
     }
 
-    refreshWho().then(() => { loadIdentity(); loadCatalog("shelf"); });
+    refreshWho().then(() => { loadIdentity(); applyHash(); });
   </script>
 </body>
 </html>
