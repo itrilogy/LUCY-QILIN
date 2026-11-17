@@ -463,6 +463,82 @@ class CatalogMixin:
             ])
         return buffer.getvalue()
 
+    def contributions(
+        self,
+        token: str,
+        *,
+        account_id: str | None = None,
+        limit: int = 100,
+    ) -> dict:
+        """发布贡献排行/明细。只给 admin；以已发布版本为准。"""
+        with self._read():
+            self._require(token, {"admin"})
+            limit = max(1, min(int(limit), 500))
+            accounts = {
+                row["id"]: dict(row)
+                for row in self._db.execute(
+                    "SELECT id, username, real_name, nickname, department, job_title FROM accounts"
+                ).fetchall()
+            }
+            rows = self._db.execute(
+                """
+                SELECT package_id, version, manifest_json, published_at
+                FROM releases WHERE unpublished_at IS NULL
+                ORDER BY published_at DESC, package_id ASC
+                """
+            ).fetchall()
+            grouped: dict[str, dict] = {}
+            for row in rows:
+                manifest = json.loads(row["manifest_json"])
+                author = manifest.get("author") if isinstance(manifest.get("author"), dict) else {}
+                publisher_id = str(author.get("publisher_id") or "")
+                if not publisher_id:
+                    continue
+                account = accounts.get(publisher_id, {})
+                entry = grouped.setdefault(publisher_id, {
+                    "account_id": publisher_id,
+                    "username": account.get("username") or author.get("username") or "",
+                    "real_name": account.get("real_name") or author.get("real_name") or "",
+                    "nickname": account.get("nickname") or author.get("nickname") or "",
+                    "department": account.get("department") or author.get("department") or "",
+                    "job_title": account.get("job_title") or author.get("job_title") or "",
+                    "products": set(),
+                    "versions": 0,
+                    "kinds": {},
+                    "last_at": "",
+                    "items": [],
+                })
+                entry["products"].add(row["package_id"])
+                entry["versions"] += 1
+                kind = str(manifest.get("kind") or "")
+                entry["kinds"][kind] = entry["kinds"].get(kind, 0) + 1
+                entry["last_at"] = max(entry["last_at"], str(row["published_at"] or ""))
+                entry["items"].append({
+                    "id": row["package_id"],
+                    "version": row["version"],
+                    "kind": kind,
+                    "title": manifest.get("title") or row["package_id"],
+                    "published_at": row["published_at"],
+                })
+            ranking = []
+            for entry in grouped.values():
+                items = sorted(entry.pop("items"), key=lambda item: (item["published_at"], item["id"]), reverse=True)
+                entry["product_count"] = len(entry.pop("products"))
+                entry["items"] = items
+                ranking.append(entry)
+            ranking.sort(key=lambda item: (-item["product_count"], -item["versions"], item["account_id"]))
+            if account_id:
+                selected = next((item for item in ranking if item["account_id"] == account_id), None)
+                details = selected["items"] if selected else []
+                return {
+                    "contributor": {key: value for key, value in (selected or {}).items() if key != "items"},
+                    "items": details[:limit],
+                    "total": len(details),
+                }
+            for item in ranking:
+                item.pop("items", None)
+            return {"items": ranking[:limit], "total": len(ranking)}
+
     def get_review(self, token: str, submission_id: str) -> dict:
         with self._read():
             self._require(token, {"admin"})

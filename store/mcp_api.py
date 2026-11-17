@@ -20,7 +20,7 @@ PUBLISHER = (
     "get_submission",
     "withdraw",
 )
-ADMIN = ("list_reviews", "get_review", "review_plugin", "approve", "reject", "unpublish", "transfer_namespace", "list_audit")
+ADMIN = ("list_reviews", "get_review", "review_plugin", "approve", "reject", "unpublish", "transfer_namespace", "list_audit", "list_contributions")
 
 _SCHEMAS: dict[str, dict] = {
     "get_spec": {
@@ -170,6 +170,13 @@ _SCHEMAS: dict[str, dict] = {
             "reason": {"type": "string", "description": "作者能看见的退回原因。"},
         },
         "required": ["submission_id", "reason"],
+    },
+    "list_contributions": {
+        "description": "发布贡献排行/明细。只给 admin；不传 account_id 返回按产品数排序的贡献者，传 account_id 返回该人的已发布产品明细。",
+        "properties": {
+            "account_id": {"type": "string", "description": "只看某个账号的贡献明细。"},
+            "limit": {"type": "integer", "description": "最多返回几条，默认 100。"},
+        },
     },
     "list_audit": {
         "description": "admin 查审计记录。按 id 倒序，可按 package_id 与 action 过滤；limit 最大 500。审计只读，不改任何状态。",
@@ -408,6 +415,12 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
     if name == "reject":
         store.reject(token, arguments["submission_id"], str(arguments.get("reason") or ""))
         return {"status": "rejected"}
+    if name == "list_contributions":
+        return store.contributions(
+            token,
+            account_id=arguments.get("account_id") or None,
+            limit=arguments.get("limit") or 100,
+        )
     if name == "list_audit":
         return store.list_audit(
             token,

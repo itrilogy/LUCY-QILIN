@@ -562,6 +562,17 @@ class SubmissionMixin:
         if not isinstance(stored.get("author"), dict):
             stored["author"] = {}
         stored["author"]["publisher_id"] = publisher.id
+        # 贡献者信息以账号为准，不接受清单里自填的用户名/姓名/部门，
+        # 避免把别人的账号挂到自己提交上。公开出口仍只保留 display_name。
+        account = self._db.execute(
+            "SELECT username, real_name, nickname, department, job_title FROM accounts WHERE id = ?",
+            (publisher.id,),
+        ).fetchone()
+        if account is not None:
+            for key in ("username", "real_name", "nickname", "department", "job_title"):
+                stored["author"][key] = account[key] or ""
+            if not str(stored["author"].get("display_name") or "").strip():
+                stored["author"]["display_name"] = account["nickname"] or account["real_name"] or account["username"]
         package_id = str(stored.get("id") or "")
         version = str(stored.get("version") or "")
         # 命名空间（id 第一个点之前）归首个发布者；同一 id 自然也在其中。

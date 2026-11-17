@@ -13,7 +13,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       no_secrets: "包内没有密钥、隐私数据或未声明上传",
       dsh_range_checked: "DSH 版本范围与目标版本相符",
     };
-    const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", shelfSort: "updated", shelfOffset: 0, shelfTotal: 0, issued: null, connectTab: "dsh-read" };
+    const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", shelfSort: "updated", shelfOffset: 0, shelfTotal: 0, issued: null, connectTab: "dsh-read", profile: null, contribAccount: "" };
 
     function show(id) {
       document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === id));
@@ -26,6 +26,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       if (id === "mine") loadMine();
       if (id === "review") loadReviews();
       if (id === "audit") loadAudit(true);
+      if (id === "contributions") loadContributions();
       if (id !== "admin-users") clearReset();
       if (id === "admin-users" && state.role === "admin") loadManage();
       if (id === "connect") renderConnect();
@@ -115,6 +116,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         gate.classList.toggle("hidden", me.role === "admin");
         document.getElementById("nav-audit").classList.toggle("hidden", me.role !== "admin");
         document.getElementById("nav-review").classList.toggle("hidden", me.role !== "admin");
+        document.getElementById("nav-contributions").classList.toggle("hidden", me.role !== "admin");
         if (me.role === "publisher") gate.textContent = "作者不能管理用户。";
         if (!named) gate.textContent = "先用审核的口令登录。";
         if (me.username) {
@@ -125,6 +127,15 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           document.getElementById("profile-title").value = me.job_title || "";
         }
         state.mcpUrl = me.mcp_url || "";
+        state.profile = me;
+        const authorCard = document.getElementById("author-card");
+        if (authorCard) {
+          authorCard.textContent = `提交者：${me.nickname || me.name || me.username || ""}（${me.real_name || ""}）/ ${me.department || "未写部门"} / ${me.username || ""}。发布后按账号统计贡献。`;
+        }
+        const authorInput = document.getElementById("f-author");
+        if (authorInput && !authorInput.value.trim()) {
+          authorInput.value = me.nickname || me.name || me.username || "";
+        }
       } catch (error) {
         state.role = "anonymous";
         who.textContent = error.message || "未登录";
@@ -403,7 +414,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
 
     function sheet(manifest, submitKind) {
       const root = document.createElement("div");
-      const author = (manifest.author || {}).display_name || "";
+      const authorBlock = manifest.author || {};
+      const author = authorBlock.display_name || "";
       const groups = [
         ["身份", [
           ["产品", manifest.id || ""],
@@ -428,6 +440,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         ["要先准备什么", [["依赖", dependText(manifest)]]],
         ["产品密钥", [["名字", secretText(manifest)]]],
       ];
+      const contributor = [
+        ["用户名", authorBlock.username || ""],
+        ["姓名", authorBlock.real_name || ""],
+        ["昵称", authorBlock.nickname || ""],
+        ["部门", authorBlock.department || ""],
+      ].filter(([, value]) => value);
+      if (contributor.length) groups.push(["贡献者", contributor]);
       const knowledge = manifest.knowledge;
       if (knowledge) {
         const taxonomy = knowledge.taxonomy || {};
@@ -643,7 +662,9 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       document.getElementById("f-version").value = mode === "new_version" ? "" : (source.version || "");
       document.getElementById("f-kind").value = source.kind || "skill";
       document.getElementById("f-submit-kind").value = mode === "add_platform" ? "add_platform" : "new_version";
-      document.getElementById("f-author").value = (source.author || {}).display_name || "";
+      document.getElementById("f-author").value = (source.author || {}).display_name
+        || (state.profile && (state.profile.nickname || state.profile.name || state.profile.username))
+        || "";
       document.getElementById("f-title").value = source.title || "";
       document.getElementById("f-summary").value = source.summary || "";
       document.getElementById("f-description").value = source.description || "";
@@ -1585,17 +1606,20 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       }
     });
 
-    document.getElementById("reissue-key").addEventListener("click", async () => {
+    async function issueKey(stateId) {
       try {
         const issued = await api("/v1/account/key", { method: "POST", body: "{}" });
         state.issued = { key: issued.key, mcp: issued.mcp };
-        setState("connect-state", "", false);
+        setState(stateId, "", false);
         await refreshWho();
         renderConnect();
       } catch (error) {
-        setState("connect-state", error.message, true);
+        setState(stateId, error.message, true);
       }
-    });
+    }
+
+    document.getElementById("reissue-key").addEventListener("click", () => issueKey("connect-state"));
+    document.getElementById("enable-publish").addEventListener("click", () => issueKey("enable-publish-state"));
 
     function connectBase() {
       return (state.mcpUrl || (location.origin + "/mcp")).replace(/\/$/, "");
@@ -1635,6 +1659,82 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       return JSON.stringify({ mcpServers: { [name]: server } }, null, 2);
     }
 
+    async function loadContributions(accountId = state.contribAccount || "") {
+      const rows = document.getElementById("contributions-rows");
+      const detail = document.getElementById("contributions-detail");
+      state.contribAccount = accountId || "";
+      if (state.role !== "admin") {
+        rows.replaceChildren();
+        detail.replaceChildren();
+        setState("contributions-state", "先用审核账号登录。贡献只给审核看。", false);
+        return;
+      }
+      setState("contributions-state", "正在读取贡献。", false);
+      try {
+        const query = accountId ? "?account_id=" + encodeURIComponent(accountId) : "";
+        const data = await api("/v1/contributions" + query);
+        if (!accountId) {
+          detail.replaceChildren();
+          rows.replaceChildren();
+          if (!(data.items || []).length) {
+            setState("contributions-state", "还没有已发布产品。", false);
+            return;
+          }
+          setState("contributions-state", "", false);
+          (data.items || []).forEach((item, index) => {
+            const tr = document.createElement("tr");
+            [index + 1, item.nickname || "", item.real_name || "", item.department || "", item.username || "",
+             item.product_count, item.versions, item.last_at || ""].forEach((value) => tr.append(text("td", value)));
+            const cell = document.createElement("td");
+            const button = text("button", "明细", "btn");
+            button.type = "button";
+            button.addEventListener("click", () => loadContributions(item.account_id));
+            cell.append(button);
+            tr.append(cell);
+            rows.append(tr);
+          });
+          return;
+        }
+        const contributor = data.contributor || {};
+        detail.replaceChildren();
+        const group = document.createElement("div");
+        group.className = "group";
+        group.append(text("h2", `贡献明细：${contributor.nickname || contributor.username || accountId}`));
+        const summary = document.createElement("dl");
+        summary.className = "kv";
+        [["用户名", contributor.username], ["姓名", contributor.real_name], ["昵称", contributor.nickname],
+         ["部门", contributor.department], ["产品", contributor.product_count], ["版本", contributor.versions]]
+          .forEach(([name, value]) => {
+            if (value == null || value === "") return;
+            summary.append(text("dt", name), text("dd", value));
+          });
+        group.append(summary);
+        if ((data.items || []).length) {
+          const table = document.createElement("table");
+          const head = document.createElement("tr");
+          ["产品", "版本", "类型", "标题", "发布时间"].forEach((value) => head.append(text("th", value)));
+          table.append(head);
+          (data.items || []).forEach((item) => {
+            const tr = document.createElement("tr");
+            [item.id, item.version, KIND_LABEL[item.kind] || item.kind, item.title, item.published_at]
+              .forEach((value) => tr.append(text("td", value)));
+            table.append(tr);
+          });
+          group.append(table);
+        } else {
+          group.append(text("p", "没有匹配的已发布产品。", "state"));
+        }
+        const back = text("button", "返回排行", "btn");
+        back.type = "button";
+        back.addEventListener("click", () => loadContributions(""));
+        group.append(back);
+        detail.append(group);
+        setState("contributions-state", "", false);
+      } catch (error) {
+        setState("contributions-state", error.message, true);
+      }
+    }
+
     function renderConnectTabs() {
       const canPublish = Boolean(state.issued && state.issued.key);
       const notes = {
@@ -1662,6 +1762,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       document.getElementById("connect-anon").classList.toggle("hidden", signed || issued);
       const secret = document.getElementById("connect-secret");
       const later = document.getElementById("connect-later");
+      document.getElementById("connect-key-gate").classList.toggle("hidden", !signed || issued);
       secret.classList.toggle("hidden", !issued);
       if (issued) document.getElementById("connect-key").textContent = state.issued.key;
       later.classList.toggle("hidden", !signed && !issued);

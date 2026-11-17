@@ -215,6 +215,13 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     )
                     self._csv(text, "qilin-audit.csv")
                     return
+                if path == "/v1/contributions":
+                    self._send(200, store.contributions(
+                        token,
+                        account_id=_one(query, "account_id") or None,
+                        limit=int(_one(query, "limit")) if _one(query, "limit") else 100,
+                    ))
+                    return
                 if path == "/v1/audit":
                     self._send(200, store.list_audit(
                         token,
