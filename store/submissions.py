@@ -51,7 +51,7 @@ class SubmissionMixin:
         submit_kind: str,
         channel: str,
     ) -> SubmitResult:
-        publisher = self._require(token, {"publisher", "admin"})
+        publisher = self._require(token, {"publisher", "reviewer", "admin"})
         stored = self._prepare(publisher, manifest, submit_kind)
         package_id = str(stored.get("id") or "")
         version = str(stored.get("version") or "")
@@ -90,7 +90,7 @@ class SubmissionMixin:
                 token, manifest, submit_kind=submit_kind, byte_size=byte_size, channel=channel,
             )
     def _begin_submit(self, token: str, manifest: dict, *, submit_kind: str, byte_size: int, channel: str) -> dict:
-        publisher = self._require(token, {"publisher", "admin"})
+        publisher = self._require(token, {"publisher", "reviewer", "admin"})
         if byte_size < 0 or byte_size > _MAX_BYTES:
             raise StoreError("CHECKSUM", "制品大小不在允许范围内")
         # 只开上传不动手的人会把状态与 blob 一直留着。这里顺带清一次，
@@ -115,7 +115,7 @@ class SubmissionMixin:
         with self._lock:
             self._save_upload(token, submission_id, data)
     def _save_upload(self, token: str, submission_id: str, data: bytes) -> None:
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能上传别人的制品")
@@ -145,7 +145,7 @@ class SubmissionMixin:
             ready = self._finish_ready(token, submission_id)
         return self._finish_checked(ready, channel=channel, probe=probe)
     def _finish_ready(self, token: str, submission_id: str) -> dict:
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能完成别人的提交")
@@ -283,7 +283,7 @@ class SubmissionMixin:
         return len(rows) + len(revisions)
     def list_my_submissions(self, token: str) -> list[dict]:
         with self._read():
-            principal = self._require(token, {"publisher", "admin"})
+            principal = self._require(token, {"publisher", "reviewer", "admin"})
             rows = self._db.execute(
                 """
                 SELECT id, package_id, version, status, review_reason
@@ -294,7 +294,7 @@ class SubmissionMixin:
             return [dict(row) for row in rows]
     def withdraw(self, token: str, submission_id: str) -> None:
         with self._lock:
-            principal = self._require(token, {"publisher", "admin"})
+            principal = self._require(token, {"publisher", "reviewer", "admin"})
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能撤回别人的提交")
@@ -308,7 +308,7 @@ class SubmissionMixin:
         with self._read():
             return self._get_submission(token, submission_id)
     def _get_submission(self, token: str, submission_id: str) -> dict:
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能查看别人的提交")
@@ -333,7 +333,7 @@ class SubmissionMixin:
         *,
         channel: str,
     ) -> SubmitResult:
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能修订别人的提交")
@@ -406,7 +406,7 @@ class SubmissionMixin:
     ) -> dict:
         """修订上传的第一段：静态校验清单，登记一条待上传的修订。"""
         with self._lock:
-            publisher = self._require(token, {"publisher", "admin"})
+            publisher = self._require(token, {"publisher", "reviewer", "admin"})
             if byte_size < 0 or byte_size > _MAX_BYTES:
                 raise StoreError("CHECKSUM", "制品大小不在允许范围内")
             row = self._submission(submission_id)
@@ -446,7 +446,7 @@ class SubmissionMixin:
 
     def save_revise_upload(self, token: str, submission_id: str, data: bytes) -> None:
         with self._lock:
-            principal = self._require(token, {"publisher", "admin"})
+            principal = self._require(token, {"publisher", "reviewer", "admin"})
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能上传别人的修订")
@@ -476,7 +476,7 @@ class SubmissionMixin:
     def finish_revise(self, token: str, submission_id: str) -> "SubmitResult":
         """修订上传的第三段：解包、校验，然后按原单替换。"""
         with self._lock:
-            principal = self._require(token, {"publisher", "admin"})
+            principal = self._require(token, {"publisher", "reviewer", "admin"})
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能完成别人的修订")
@@ -539,7 +539,7 @@ class SubmissionMixin:
         return [item["rule"] for item in self.explain_manifest(token, manifest) if item["severity"] == "error"]
     def explain_manifest(self, token: str, manifest: dict) -> list[dict]:
         with self._read():
-            self._require(token, {"publisher", "admin"})
+            self._require(token, {"publisher", "reviewer", "admin"})
             report = validate_manifest(manifest, releases=self._releases())
             return [
                 {"rule": item.rule, "path": item.path, "message": item.message, "severity": item.severity}

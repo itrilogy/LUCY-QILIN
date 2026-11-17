@@ -11,11 +11,12 @@ from __future__ import annotations
 import base64
 import json
 import re
+import secrets
 import sys
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "http://127.0.0.1:8787"
@@ -44,7 +45,20 @@ def post(path: str, body: dict, key: str) -> dict:
         return json.loads(response.read().decode())
 
 
-def pending_plugin(key: str) -> str:
+def create_author(admin_key: str) -> tuple[str, str]:
+    username = "e2e.author." + secrets.token_hex(3)
+    password = "E2e" + secrets.token_hex(6) + "9"
+    result = post("/v1/account", {
+        "username": username,
+        "real_name": "E2E 作者",
+        "nickname": "E2E 作者",
+        "department": "测试",
+        "password": password,
+    }, admin_key)
+    return result["id"], result["key"]
+
+
+def pending_plugin(key: str, package_id: str) -> str:
     files = {
         "package.json": json.dumps({
             "name": "@e2e/portal-check",
@@ -61,7 +75,7 @@ def pending_plugin(key: str) -> str:
     manifest = {
         "spec_version": 1,
         "kind": "plugin",
-        "id": "e2e.portal-check",
+        "id": package_id,
         "version": "1.0.0",
         "title": "门户 E2E 插件",
         "summary": "用于验证门户插件表单与审核清单。",
@@ -93,8 +107,10 @@ def pending_plugin(key: str) -> str:
 
 
 def main() -> int:
-    key = admin_key()
-    submission_id = pending_plugin(key)
+    admin_key_value = admin_key()
+    author_id, author_key = create_author(admin_key_value)
+    package_id = "e2e" + secrets.token_hex(3) + ".portal-check"
+    submission_id = pending_plugin(author_key, package_id)
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel="msedge", headless=True)
@@ -138,31 +154,20 @@ def main() -> int:
             page.fill("#login-username", REVIEWER["username"])
             page.fill("#login-password", REVIEWER["password"])
             page.click("#login-submit")
-            page.locator("#who").filter(has_text="审核").wait_for()
+            page.locator("#who").filter(has_text=re.compile("管理员|审核")).wait_for()
             page.click('.nav button[data-view="connect"]')
             assert page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]').is_disabled()
-            assert page.locator("#connect-key-gate").is_visible()
-            page.click("#enable-publish")
-            page.wait_for_timeout(400)
-            key = page.locator("#connect-key").inner_text().strip()
-            assert key, "重新生成后没有显示 KEY 明文"
+            assert page.locator("#connect-keypanel").is_visible()
+            page.fill("#connect-existing-key", REVIEWER["key"])
+            page.click("#use-existing-key")
+            expect(page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]')).to_be_enabled()
             page.click('#connect-tab-buttons button[data-tab="dsh-publish"]')
             body = page.locator("#connect-tab-body").inner_text()
             assert "qilin-publish" in body
             assert "Authorization: Bearer" in body
-            assert key in body
-            REVIEWER["key"] = key
-            (ROOT / "var/accounts/reviewer.json").write_text(
-                json.dumps(REVIEWER, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-            )
-            # 重新生成可能清掉旧会话；如果页面已经回到未登录，就重新登录。
-            page.wait_for_timeout(600)
-            if page.locator("#login-open").is_visible():
-                page.click("#login-open")
-                page.fill("#login-username", REVIEWER["username"])
-                page.fill("#login-password", REVIEWER["password"])
-                page.click("#login-submit")
-            page.locator("#who").filter(has_text="审核").wait_for()
+            assert REVIEWER["key"] in body
+            # 不在这里重新生成：那会作废 QILIN profile 正在使用的 KEY。
+            assert page.locator("#reissue-key").count() == 1
             page.click('.nav button[data-view="contributions"]')
             page.wait_for_selector("#contributions-rows tr")
             page.locator("#contributions-rows button").first.click()
@@ -182,7 +187,7 @@ def main() -> int:
             queue = page.locator("#review-queue .list-btn")
             found = False
             for index in range(queue.count()):
-                if "e2e.portal-check" in queue.nth(index).inner_text():
+                if package_id in queue.nth(index).inner_text():
                     queue.nth(index).click()
                     found = True
                     break
@@ -202,7 +207,11 @@ def main() -> int:
     finally:
         # 失败时尽量把待审插件退回，避免留在队列里。
         try:
-            post(f"/v1/submissions/{submission_id}/reject", {"reason": "E2E 清理"}, key)
+            post(f"/v1/submissions/{submission_id}/reject", {"reason": "E2E 清理"}, admin_key_value)
+        except Exception:
+            pass
+        try:
+            post(f"/v1/accounts/{author_id}/disable", {}, admin_key_value)
         except Exception:
             pass
 

@@ -46,13 +46,17 @@ KEY 不由本人编，也不由管理员抄给人。创建账号时商店另生�
 
 账号资料：用户名、姓名、昵称、部门、岗位。用户名创建后不改。昵称是货架和顶栏上的名字。本人可以改姓名、昵称、部门和岗位，不能改别人的。
 
-用户管理是单独一页，只对审核开放：改角色、停用，以及给别人重置口令。重置由商店生成一把新的随机口令，只在这一次响应里出现，并清掉对方的登录会话。不能自己编这把口令，不能重置自己的，也看不见原来的口令或 KEY。对方的商店 KEY 不因重置口令而改变。作者打开这一页只会看到自己不能管理。
+用户管理是单独一页，只对**管理员**开放：改角色、停用，以及给别人重置口令。审核没有用户管理权。重置由商店生成一把新的随机口令，只在这一次响应里出现，并清掉对方的登录会话。不能自己编这把口令，不能重置自己的，也看不见原来的口令或 KEY。对方的商店 KEY 不因重置口令而改变。作者打开这一页只会看到自己不能管理。
 
 | 谁 | 角色 | 能做 | 不能做 |
 |---|---|---|---|
-| 第一位创建账号的人 | `admin` 审核 | 上传、审核、发布、退回、下架，改别人的角色、停用别人，给别人重置口令，改自己的口令，重新生成自己的 KEY | 看见原来的口令或 KEY；自己编别人的新口令；重置自己的口令；停用自己；把最后一位审核降下去 |
-| 之后自己创建账号的人 | `publisher` 作者 | 校验、上传到待审核、查看和撤回自己的提交，改自己的资料和口令，重新生成自己的 KEY | 审核、发布、下架、用户管理、看见别人的待审核包 |
-| 未登录 | 匿名 | 查找已发布内容；读取上架规范；在商店 MCP 里取安装步骤和制品地址 | 上传、审核；在页面上点「安装说明」 |
+| 第一位创建账号的人 | `admin` 管理员 | 作者能力 + 审核、发布、退回、下架 + 用户管理、改角色、停用、重置口令、命名空间转移 | 看见原来的口令或 KEY；自己编别人的新口令；重置自己的口令；停用自己；把最后一位管理员降下去；批准自己的提交 |
+| 之后自己创建账号的人 | `publisher` 作者 | 校验、上传到待审核、查看/修订/撤回自己的提交、改自己的资料和口令、重新生成自己的 KEY | 审核、发布、下架、用户管理、角色分配、命名空间转移、批准自己的提交 |
+| 管理员提升的人 | `reviewer` 审核 | 作者能力 + 审核、发布、退回、下架、审计、贡献排行/明细 | 用户管理、改角色、停用、重置口令、命名空间转移、批准自己的提交 |
+| 枢纽侧只读 | `member` 只读 | 浏览、读规范、取安装步骤和制品地址 | 上传、审核、发布、用户管理 |
+| 未登录 | 匿名 | 浏览已发布内容、读规范、取安装步骤和制品地址 | 上传、审核、发布、下载页面动作 |
+
+本地创建的账号默认是 `publisher`（作者），不是只读。`member` 只用于枢纽侧 viewer/外部只读身份；如果希望枢纽用户也能提交，把 `_role` 的 viewer 映射改成 `publisher`。管理员可以随时把作者提升为审核，或再提升为管理员；最后一位管理员不能被降级或停用。
 
 约定：
 
@@ -61,11 +65,11 @@ KEY 不由本人编，也不由管理员抄给人。创建账号时商店另生�
 - 重新生成会作废原来的那一把，并删掉旧会话。这不是第二把。请求里若自己带了 KEY，拒收（`KEY_INVALID`）。KEY 与别人重复则拒收（`KEY_TAKEN`）。
 - 用户名须以小写字母开头，3 到 32 位（`USERNAME_INVALID` / `USERNAME_TAKEN`）。姓名和昵称不能空，资料字段不超过 64 个字（`NAME_INVALID`）。
 - 匿名连接可以查找已发布内容，也可以读取上架规范，不能上传。
-- 页面上的下载须先登录。货架的「安装说明」在未登录时不请求安装计划。AI 工具侧的浏览、下载、使用走商店 MCP，说明在「连接」菜单。
+- 下载不需要 KEY：制品地址匿名可下载，安装器也不带口令。发布、审核、用户管理和写操作需要 KEY。货架的「安装说明」在未登录时不请求安装计划；AI 工具侧的浏览、下载、使用走商店 MCP，说明在「连接」菜单。
 - `GET /v1/artifacts/<id>/<version>` 仍不要求登录。安装器下载 `install_plan` 里的地址时不带口令。把这一刀切到制品地址上，会让安装步骤里的下载失败。页面动作和制品地址是两件事，不要只改文案假装 HTTP 已经要求登录。
 - 清单里的 `author.display_name` 由作者填写；`author.publisher_id` 以登录身份为准。两者冲突则拒收（规则 `AUTHOR_MISMATCH`）。作者不能冒充别人。
 
-若配置了 `QILIN_HUB_ORIGIN`，长度超过 256 的 Bearer 仍按枢纽访问令牌验签（`aud=lucy-qilin`，角色 `publisher` / `admin`）。这是实验室统一用户管理的另一条入口，不代替上面这把 KEY。枢纽令牌签不上得到 `IDENTITY_INVALID`。未配置枢纽时，不把这种长令牌当成匿名。
+若配置了 `QILIN_HUB_ORIGIN`，长度超过 256 的 Bearer 仍按枢纽访问令牌验签（`aud=lucy-qilin`，角色 `publisher` / `reviewer` / `admin`；其余映射 `member`）。这是实验室统一用户管理的另一条入口，不代替上面这把 KEY。枢纽令牌签不上得到 `IDENTITY_INVALID`。未配置枢纽时，不把这种长令牌当成匿名。
 
 配置了枢纽地址，并且进程环境里有 `QILIN_HUB_SECRET` 时，枢纽可以把人重定向到 `GET /auth/callback?code=&state=`。栖林用应用密钥签名，向枢纽换访问令牌，验签后建立自己的会话。访问令牌不出现在浏览器地址里。枢纽若一并给了刷新令牌，它只留在库里，不进任何接口响应；访问令牌快过期时用它再换一次，旧的立即作废，换不到就结束这次会话。枢纽这次没给刷新令牌时，会话停在该访问令牌的过期时间，人从枢纽再进一次，不用把令牌贴进页面。这条会话不产生商店 KEY。没配应用密钥时，跳转登录拒绝（`IDENTITY_UNCONFIGURED`）。日常登录仍是口令和 KEY。枢纽登出回调会清掉这个人在栖林的跳转会话。
 
@@ -497,13 +501,13 @@ DSH 的 Host/Client 代码。配置式 bundle（只插 MCP 连接、没有代码
 
 安装计划：`download` → `check_bin`（每个外部命令）→ `plugin_stage`（解压到 `${PLUGIN_STAGING}/<id>/<version>`，核对 `package.json`，不执行代码）→ `plugin_confirm`（打印路径与安装说明）→ `verify`。商店和参考安装器都不调用 `plugin_manager`；实际安装由用户在 DSH Plugins 里确认。
 
-Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier C 拒绝。`approve` 对 plugin 增加 `SELF_REVIEW`：admin 不能批准自己提交的插件。 `approve` 前必须先调 `review_plugin` 记录审核清单；没有记录返回 `PLUGIN_REVIEW_REQUIRED`。清单项见 `PLUGIN_REVIEW_ITEMS`，必须逐项为 true。
+Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier C 拒绝。`approve` 增加 `SELF_REVIEW`：任何人不能批准自己提交的产品（不只 plugin）。 `approve` 前必须先调 `review_plugin` 记录审核清单；没有记录返回 `PLUGIN_REVIEW_REQUIRED`。清单项见 `PLUGIN_REVIEW_ITEMS`，必须逐项为 true。
 
 ## 5. 商店 MCP
 
-一个 MCP 服务，传输 `streamable-http`。工具按这把 KEY 的角色自动可见：匿名和未授权看不到上传和审核工具；`publisher` 看不到审核工具；`admin` 全部可见。不要把令牌当成工具参数。
+一个 MCP 服务，传输 `streamable-http`。工具按这把 KEY 的角色自动可见：匿名和 `member` 看不到上传和审核工具；`publisher` 看不到审核工具；`reviewer` 可见上传 + 审核；`admin` 全部可见。不要把令牌当成工具参数。
 
-`initialize` 返回 `instructions`。三种角色都先被告知：打包规范不在技能正文里，先 `get_spec`，或读取资源 `qilin://spec/<name>`。匿名的说明里不出现上传工具的名字。作者还会被告知：按规范整理目录，再 `validate`，有 error 就按 `path` 和 `message` 改包，`ok` 为 true 再用本机的 `store submit` 交目录，不要在还有错误时 `begin_submit`，也不要在 `store submit` 之外再手动交一次。审核还会被告知只发布、退回或下架，不改清单。工具描述写明何时调用、什么不能做、结果是什么。商店仍不执行安装。
+`initialize` 返回 `instructions`。四种角色都先被告知：打包规范不在技能正文里，先 `get_spec`，或读取资源 `qilin://spec/<name>`。匿名的说明里不出现上传工具的名字。作者还会被告知：按规范整理目录，再 `validate`，有 error 就按 `path` 和 `message` 改包，`ok` 为 true 再用本机的 `store submit` 交目录，不要在还有错误时 `begin_submit`，也不要在 `store submit` 之外再手动交一次。审核还会被告知只发布、退回或下架，不改清单。工具描述写明何时调用、什么不能做、结果是什么。商店仍不执行安装。
 
 规范正文只在 `store/protocol.py`。`get_spec` 和 `resources/read` 返回同一段文字。与第 4 节不一致时，以校验器为准，并改这段文字，不要在技能文件里再存一份。
 
@@ -521,7 +525,7 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | `install_plan` | 参数：`id`、`version`（必填精确号）、`client`、`platform`。版本必须先由 `resolve` 或调用方选定。平台不在该版本里返回 `PLATFORM_MISMATCH`，不生成步骤 |
 | `artifact` | 参数：`id`、`version`、`platform`。返回该平台制品的短期 URL 和 sha256。`any` 的技能包忽略具体平台、返回那一份 zip |
 
-`publisher`：
+`publisher`（作者；`reviewer`/`admin` 继承）：
 
 | 工具 | 作用 |
 |---|---|
@@ -534,18 +538,18 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | `get_submission` | 自己的某一条，含校验报告 |
 | `withdraw` | 撤回仍为 `pending` 的提交 |
 
-`admin`：
+`reviewer`（审核）与 `admin`（管理员）：
 
 | 工具 | 作用 |
 |---|---|
 | `list_reviews` | 参数：`status`，默认 `pending` |
 | `get_review` | 清单、校验报告、zip 文件清单（不是整个压缩包内容） |
-| `review_plugin` | 参数：`submission_id`、`checklist`（逐项为 true）。admin 专用；不能审自己提交的插件。记录审核人与制品 sha256；`approve` 插件前必须有这条记录。 |
+| `review_plugin` | 参数：`submission_id`、`checklist`（逐项为 true）。审核/管理员可用；不能审自己提交的插件。记录审核人与制品 sha256；`approve` 插件前必须有这条记录。 |
 | `approve` | `new_version` 变为一个新的已发布版本；`add_platform` 只给该版本加上这个平台。已有平台的文件不变 |
 | `reject` | 参数：`submission_id`、`reason`。作者能在 `list_my_submissions` 里看见原因 |
 | `unpublish` | 已发布版本下架，须填写原因 |
-| `transfer_namespace` | 把命名空间转给另一个作者。只改所有者记录，不改写历史提交与审计 |
-| `list_contributions` | 贡献排行/明细。admin 专用；不传 `account_id` 返回排行，传则返回该账号的已发布产品明细 |
+| `transfer_namespace` | 仅管理员：把命名空间转给另一个作者。只改所有者记录，不改写历史提交与审计 |
+| `list_contributions` | 贡献排行/明细。审核/管理员可用；不传 `account_id` 返回排行，传则返回该账号的已发布产品明细 |
 | `list_audit` | 读审计记录。按 id 倒序，可按包与动作过滤；只读 |
 
 `runtime` 的上传和审核用同一组工具，不另做一套。规范也走 `get_spec`，不另做工具。
@@ -683,14 +687,14 @@ PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果
 
 v1 一个进程、一个 SQLite、一个本地制品目录。不要先上数据库集群。
 
-- `accounts`：id、username、display_name（与昵称相同，供旧读法）、real_name、nickname、department、job_title、role（`publisher` | `admin`）、password_salt、password_hash、key_salt、key_hash、disabled_at。口令和 KEY 都没有明文。创建和重新生成 KEY 的那一次响应才带 KEY 明文和 MCP 配置
+- `accounts`：id、username、display_name（与昵称相同，供旧读法）、real_name、nickname、department、job_title、role（`member` | `publisher` | `reviewer` | `admin`）、password_salt、password_hash、key_salt、key_hash、disabled_at。口令和 KEY 都没有明文。创建和重新生成 KEY 的那一次响应才带 KEY 明文和 MCP 配置
 - `sessions`：门户登录会话的哈希和过期时间。会话不是 KEY
 - `principals`：只留给测试夹具。提交上的 `publisher_id` 是账号 id；若用的是枢纽令牌，则是令牌的 `sub`
 - `submissions`：id、package_id、version、submit_kind（`new_version` | `add_platform`）、platforms、kind、status、publisher_id、manifest_json、artifact_path、artifact_sha256、validation_report_json、review_reason、reviewed_by、created_at、reviewed_at
 - `revisions`：submission_id、manifest_json、byte_size、artifact_path、created_at。修订上传的暂存区；`finish_revise` 成功或失败后删除
 - `releases`：package_id、version、manifest_json、published_at、unpublished_at、unpublish_reason。主键 `(package_id, version)`。下架后整版离开搜索，但行还在
 - `release_platforms`：package_id、version、platform、artifact_path、sha256、submission_id、published_at。主键 `(package_id, version, platform)`。已有主键不可更新（`PLATFORM_TAKEN` / `VERSION_IMMUTABLE`）
-- `package_owners`：namespace、publisher_id、created_at、updated_at。主键 `namespace`。首个在该前缀下发布商品的发布者成为所有者；admin 可转移。启动时按已发布提交回填。
+- `package_owners`：namespace、publisher_id、created_at、updated_at。主键 `namespace`。首个在该前缀下发布商品的发布者成为所有者；管理员可转移。启动时按已发布提交回填。
 - `catalog_index`：package_id 主键、version、kind、title、summary、description、clients、platforms、manifest_json、updated_at。每个包只放最新可见版本；发布与下架时增量维护，启动时重建。`search` 走这张表，不再解析全部清单。
 - `catalog_fts`：FTS5 trigram 虚表（package_id、title、summary、description），与 `catalog_index` 同步维护。3 个字符以上的查询走 `MATCH`，短词回退 `LIKE`；SQLite 没编 FTS5 时整体回退 `LIKE`。
 - `client_caps`：client_id、caps（JSON 数组）
@@ -996,7 +1000,7 @@ Python 依赖不进商店镜像。写法固定为 `depends.external`：`detect` 
 1. **货架**。导语：「货架陈列已经发布的技能、MCP、知识包与插件。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。」说明：「本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。」先是搜索、排序和分类（全部、技能、MCP、技能与 MCP、知识包、插件），再是在架数量；每页 12 条，可加载更多。卡片用完整的一句话说明；下面是产品 id、平台、AI 工具和作者。点进详情用 `list_versions`，由人选定版本再看 `describe`。运行时不进默认货架。
 2. **详情**。标题下先是一句话和整段说明，再是七组上架单。调用、依赖、密钥名写成句子，不把 JSON 倒在页面上。版本表的「适用平台」是作者写进这一版的；`any` 显示为「任意平台」。知识包另列一组：分类三段、入口、密级、范围、词表、语言与许可、生产溯源、本地主题。表下面的「装到这台电脑」不是创建时保存的，只为生成安装说明。适用 `any` 时，这里才列出六种具体电脑，并写明第一项不是产品数据。主按钮只有一个：「安装说明」展示 `install_plan` 的步骤，不在门户里执行安装。
 3. **用户**。未登录时这一页只注册。登录是顶栏弹出的登录框：用户名和口令两个输入，不列出已有的人，也不公开账号名单。登录后这一页只剩资料和修改口令，两块分开。注册成功会换成新会话，所以已登录时不再显示注册。没有「把密钥发给某人」的按钮。
-4. **用户管理**。单独一页。未登录或作者只看到不能管理。审核看到名单，可以改角色、停用、给别人重置口令，也可以把某个命名空间转给另一个作者。新口令随机生成，只显示一次。不能重置自己的，不能看见原来的口令或 KEY。
+4. **用户管理**。单独一页，只给管理员。未登录、作者、审核只看到不能管理。管理员看到名单，可以改角色、停用、给别人重置口令，也可以把某个命名空间转给另一个作者。新口令随机生成，只显示一次。不能重置自己的，不能看见原来的口令或 KEY。
 5. **连接**。四个标签页：DSH 只读、DSH 发布、通用只读、通用发布。只读不带 KEY；发布配置在页面持有 KEY 明文时直接写入，不再用环境变量或占位符。登录只保留会话、不保留 KEY 明文，所以发布标签默认置灰；页面用「重新生成并显示发布配置」显式生成一把新 KEY（旧 KEY 失效），并同时列出 KEY 明文。四个配置的 serverName 固定为 `qilin-store` / `qilin-publish`，同一客户端只装一个，发布配置已包含只读工具。口令不能代替 KEY。连上之后，上架规范用 `get_spec` 取。
 6. **上架 / 修订**。同一张七组表单。每组中文标题下保留字段名，不另做一套作者字段。换 `kind` 后收起这一类型用不到的组：纯技能不展开 MCP 连接项，纯 MCP 不展开制品（远程 MCP 没有制品），运行时不展开技能入口。MCP 按传输方式只展开 `url` 或 `command`。`add_platform` 只出现在运行时。技能、MCP 和运行时可以声明依赖和密钥名，没有就留空。知识包这两项留空数组，页面上不出现。身份、阐述、适用里规格要求的字段标成必填，空着不能提交。待审核显示「修订此提交」；已发布显示「上架新版本」和「追加平台」。提交前先走与 MCP `validate` 相同的接口，规则 id 标在字段上。页面仍然提交同一份上架单。
 7. **审核**。左列待审，右列同一份上架单加校验报告和与上一版的差异。主按钮「发布」；「退回」是 danger，必须填原因。空队列有下一步：回到货架。
@@ -1023,7 +1027,7 @@ Python 依赖不进商店镜像。写法固定为 `depends.external`：`detect` 
 | 5 安装器 | `store-install` | 只执行第 6 节的 op；版本号必填 |
 | 6 上传验收 | 一份按 `get_spec` 整理的技能目录 | `store submit` 进入 `pending`。既有技能目录的改造不在本工程 |
 
-阶段 3 的身份是商店为每个用户生成的一把 KEY，不是人自己设置的，也不是 `store serve` 打印出来的。配置了枢纽时，长令牌仍按 `lucy-qilin` 的 `publisher` / `admin` 验签。
+阶段 3 的身份是商店为每个用户生成的一把 KEY，不是人自己设置的，也不是 `store serve` 打印出来的。配置了枢纽时，长令牌仍按 `lucy-qilin` 的 `publisher` / `reviewer` / `admin` 验签，其余为 `member`。
 
 阶段 4 不提前做视觉探索。页面按 `qilin-portal.html` 的结构和 tokens 实现。阶段 6 只验收上传路径：符合规范的目录能交到待审核。既有技能怎么改，由用户连上商店 MCP 之后自己做，不记入本工程。校验不通过就退回，不改规则迁就旧包。
 

@@ -1,6 +1,6 @@
 const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-arm64", "windows-amd64"];
     const KIND_LABEL = { skill: "技能", mcp: "MCP", "mcp+skill": "技能与 MCP", runtime: "运行时", knowledge: "知识包", plugin: "插件" };
-    const ROLE_LABEL = { admin: "审核", publisher: "作者", member: "未授权" };
+    const ROLE_LABEL = { admin: "管理员", reviewer: "审核", publisher: "作者", member: "只读" };
     const SECURITY_LABEL = { public: "公开", internal: "内部", restricted: "受限", confidential: "机密" };
     const SCOPE_LABEL = { enterprise: "企业", work: "工作产出" };
     const PLUGIN_REVIEW_LABELS = {
@@ -114,10 +114,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         const board = document.getElementById("admin-board");
         board.classList.toggle("hidden", me.role !== "admin");
         gate.classList.toggle("hidden", me.role === "admin");
-        document.getElementById("nav-audit").classList.toggle("hidden", me.role !== "admin");
-        document.getElementById("nav-review").classList.toggle("hidden", me.role !== "admin");
-        document.getElementById("nav-contributions").classList.toggle("hidden", me.role !== "admin");
+        const reviewer = me.role === "reviewer" || me.role === "admin";
+        document.getElementById("nav-audit").classList.toggle("hidden", !reviewer);
+        document.getElementById("nav-review").classList.toggle("hidden", !reviewer);
+        document.getElementById("nav-contributions").classList.toggle("hidden", !reviewer);
+        document.getElementById("nav-admin-users").classList.toggle("hidden", me.role !== "admin");
         if (me.role === "publisher") gate.textContent = "作者不能管理用户。";
+        if (me.role === "reviewer") gate.textContent = "审核不能管理用户；用户管理只给管理员。";
         if (!named) gate.textContent = "先用审核的口令登录。";
         if (me.username) {
           document.getElementById("profile-username").value = me.username;
@@ -527,8 +530,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
 
     let auditOffset = 0;
     async function loadAudit(reset) {
-      if (state.role !== "admin") {
-        setState("audit-state", "用审核账号登录后才能看审计。", false);
+      if (!["reviewer", "admin"].includes(state.role)) {
+        setState("audit-state", "用审核或管理员账号登录后才能看审计。", false);
         document.getElementById("audit-rows").replaceChildren();
         document.getElementById("audit-more").classList.add("hidden");
         return;
@@ -1197,8 +1200,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       queue.replaceChildren();
       detail.replaceChildren(text("p", "选左边的一条。", "state"));
       document.getElementById("review-back").classList.add("hidden");
-      if (state.role !== "admin") {
-        setState("review-state", "先用审核的 KEY 登录。作者看不到这一页。", false);
+      if (!["reviewer", "admin"].includes(state.role)) {
+        setState("review-state", "先用审核或管理员账号登录。作者看不到这一页。", false);
         return;
       }
       setState("review-state", "正在读取审核队列。", false);
@@ -1618,8 +1621,34 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       }
     }
 
-    document.getElementById("reissue-key").addEventListener("click", () => issueKey("connect-state"));
-    document.getElementById("enable-publish").addEventListener("click", () => issueKey("enable-publish-state"));
+    async function useExistingKey() {
+      const input = document.getElementById("connect-existing-key");
+      const key = input.value.trim();
+      if (!key) {
+        setState("connect-key-state", "先粘贴已保存的 KEY。", true);
+        return;
+      }
+      try {
+        const response = await fetch("/v1/me", {
+          headers: { Authorization: "Bearer " + key },
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error("这把 KEY 无效或已失效。");
+        const me = await response.json();
+        if (state.userId && me.id !== state.userId) {
+          throw new Error("这把 KEY 不属于当前登录账号。");
+        }
+        state.issued = { key };
+        input.value = "";
+        setState("connect-key-state", "", false);
+        renderConnect();
+      } catch (error) {
+        setState("connect-key-state", error.message, true);
+      }
+    }
+
+    document.getElementById("use-existing-key").addEventListener("click", useExistingKey);
+    document.getElementById("reissue-key").addEventListener("click", () => issueKey("connect-key-state"));
 
     function connectBase() {
       return (state.mcpUrl || (location.origin + "/mcp")).replace(/\/$/, "");
@@ -1663,7 +1692,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       const rows = document.getElementById("contributions-rows");
       const detail = document.getElementById("contributions-detail");
       state.contribAccount = accountId || "";
-      if (state.role !== "admin") {
+      if (!["reviewer", "admin"].includes(state.role)) {
         rows.replaceChildren();
         detail.replaceChildren();
         setState("contributions-state", "先用审核账号登录。贡献只给审核看。", false);
@@ -1760,13 +1789,14 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       const signed = signedIn();
       const issued = Boolean(state.issued && state.issued.key);
       document.getElementById("connect-anon").classList.toggle("hidden", signed || issued);
-      const secret = document.getElementById("connect-secret");
-      const later = document.getElementById("connect-later");
-      document.getElementById("connect-key-gate").classList.toggle("hidden", !signed || issued);
-      secret.classList.toggle("hidden", !issued);
-      if (issued) document.getElementById("connect-key").textContent = state.issued.key;
-      later.classList.toggle("hidden", !signed && !issued);
-      if (signed) document.getElementById("connect-url").textContent = state.mcpUrl || "";
+      document.getElementById("connect-keypanel").classList.toggle("hidden", !signed && !issued);
+      const keyNode = document.getElementById("connect-key");
+      keyNode.classList.toggle("hidden", !issued);
+      if (issued) keyNode.textContent = state.issued.key;
+      document.getElementById("connect-key-note").textContent = issued
+        ? "已生成。发布标签直接带这把 KEY；离开页面后明文不再显示。需要换 KEY 时重新生成，旧 KEY 会立即失效。"
+        : "登录只保留会话，不保留 KEY 明文。已保存过 KEY 的，直接粘贴激活；没有保存的，才用「重新生成 KEY」。重新生成会立刻作废旧 KEY。";
+      document.getElementById("connect-url").textContent = signed ? (state.mcpUrl || "") : "";
       renderConnectTabs();
     }
 
@@ -1809,7 +1839,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
             text("td", item.username),
           );
           const role = document.createElement("select");
-          role.append(new Option("作者", "publisher"), new Option("审核", "admin"));
+          role.append(new Option("作者", "publisher"), new Option("审核", "reviewer"), new Option("管理员", "admin"));
           role.value = item.role;
           role.addEventListener("change", async () => {
             try {

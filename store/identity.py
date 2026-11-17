@@ -217,6 +217,8 @@ def _role(app_roles: Any) -> str:
     roles = set(app_roles) if isinstance(app_roles, list) else set()
     if "admin" in roles:
         return "admin"
+    if "reviewer" in roles:
+        return "reviewer"
     if "publisher" in roles:
         return "publisher"
     return "member"

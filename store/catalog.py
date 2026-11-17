@@ -43,7 +43,7 @@ class CatalogMixin:
         with self._lock:
             return self._review_plugin(token, submission_id, checklist)
     def _review_plugin(self, token: str, submission_id: str, checklist: dict) -> dict:
-        admin = self._require(token, {"admin"})
+        admin = self._require(token, {"reviewer", "admin"})
         row = self._submission(submission_id)
         if row["status"] != "pending":
             raise StoreError("VERSION_UNAVAILABLE", "只能审核待审核的插件")
@@ -78,12 +78,12 @@ class CatalogMixin:
         with self._lock:
             self._approve(token, submission_id)
     def _approve(self, token: str, submission_id: str) -> None:
-        admin = self._require(token, {"admin"})
+        admin = self._require(token, {"reviewer", "admin"})
         row = self._submission(submission_id)
         advance(row["status"], "approve", SUBMISSION, "只有待审核的提交可以发布")
         manifest = json.loads(row["manifest_json"])
-        if manifest.get("kind") == "plugin" and row["publisher_id"] == admin.id:
-            raise StoreError("SELF_REVIEW", "不能批准自己提交的插件")
+        if row["publisher_id"] == admin.id:
+            raise StoreError("SELF_REVIEW", "不能批准自己提交的产品")
         if manifest.get("kind") == "plugin":
             review = self._db.execute(
                 "SELECT 1 FROM plugin_reviews WHERE submission_id = ?", (submission_id,)
@@ -134,7 +134,7 @@ class CatalogMixin:
         with self._lock:
             self._reject(token, submission_id, reason)
     def _reject(self, token: str, submission_id: str, reason: str) -> None:
-        admin = self._require(token, {"admin"})
+        admin = self._require(token, {"reviewer", "admin"})
         if not reason.strip():
             raise StoreError("DESCRIPTION", "退回必须写原因")
         row = self._submission(submission_id)
@@ -351,7 +351,7 @@ class CatalogMixin:
         with self._read():
             return self._list_reviews(token)
     def _list_reviews(self, token: str) -> list[dict]:
-        self._require(token, {"admin"})
+        self._require(token, {"reviewer", "admin"})
         rows = self._db.execute(
             """
             SELECT id, package_id, version, status, submit_kind, manifest_json
@@ -384,7 +384,7 @@ class CatalogMixin:
         审计一直是只写不读；这里给运维一个出口，不新增写路径。
         """
         with self._read():
-            self._require(token, {"admin"})
+            self._require(token, {"reviewer", "admin"})
             limit = max(1, min(int(limit), 500))
             offset = max(0, int(offset))
             clauses: list[str] = []
@@ -426,9 +426,9 @@ class CatalogMixin:
         package_id: str | None = None,
         action: str | None = None,
     ) -> str:
-        """审计导出。只给 admin；最多一万条，避免一次拉爆。"""
+        """审计导出。审核/管理员可读；最多一万条，避免一次拉爆。"""
         with self._read():
-            self._require(token, {"admin"})
+            self._require(token, {"reviewer", "admin"})
             clauses: list[str] = []
             params: list[object] = []
             if package_id:
@@ -470,9 +470,9 @@ class CatalogMixin:
         account_id: str | None = None,
         limit: int = 100,
     ) -> dict:
-        """发布贡献排行/明细。只给 admin；以已发布版本为准。"""
+        """发布贡献排行/明细。审核/管理员可读；以已发布版本为准。"""
         with self._read():
-            self._require(token, {"admin"})
+            self._require(token, {"reviewer", "admin"})
             limit = max(1, min(int(limit), 500))
             accounts = {
                 row["id"]: dict(row)
@@ -541,7 +541,7 @@ class CatalogMixin:
 
     def get_review(self, token: str, submission_id: str) -> dict:
         with self._read():
-            self._require(token, {"admin"})
+            self._require(token, {"reviewer", "admin"})
             row = self._submission(submission_id)
             names: list[str] = []
             current_texts: dict[str, str] = {}

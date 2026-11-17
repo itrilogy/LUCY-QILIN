@@ -35,7 +35,7 @@
         <button type="button" data-view="audit" id="nav-audit" class="hidden">审计</button>
         <button type="button" data-view="contributions" id="nav-contributions" class="hidden">贡献</button>
         <button type="button" data-view="users">用户</button>
-        <button type="button" data-view="admin-users">用户管理</button>
+        <button type="button" data-view="admin-users" id="nav-admin-users" class="hidden">用户管理</button>
         <button type="button" data-view="connect">连接</button>
       </nav>
       <main class="main" id="main">
@@ -236,23 +236,18 @@
             <div class="row"><button type="button" class="btn primary" id="copy-tab">复制这一段</button></div>
             <p class="state" id="copy-tab-state"></p>
           </div>
-          <div class="group hidden" id="connect-key-gate">
-            <h2>发布配置需要 KEY 明文</h2>
-            <p class="foot">登录只保留会话，不保留 KEY 明文，所以发布标签默认置灰。点下面按钮会重新生成一把 KEY（旧 KEY 立即失效），并直接填入发布配置。</p>
-            <div class="row"><button type="button" class="btn primary" id="enable-publish">重新生成并显示发布配置</button></div>
-            <p class="state" id="enable-publish-state"></p>
-          </div>
-          <div class="group hidden" id="connect-secret">
-            <h2>这一把 KEY</h2>
-            <p class="foot">只出现这一次。发布标签会直接带上这把 KEY；只读配置不需要它。离开页面后明文不再显示，需要时用下面的「重新生成」。</p>
-            <pre id="connect-key" class="diff"></pre>
-          </div>
-          <div class="group hidden" id="connect-later">
-            <h2>已经生成</h2>
-            <p class="foot" id="connect-later-note">这把 KEY 已经生成。明文只在创建或重新生成时出现一次；重新生成会作废原来的那一把。内网使用时，发布标签会直接带 KEY，不需要再设环境变量。</p>
+          <div class="group hidden" id="connect-keypanel">
+            <h2>KEY 与发布配置</h2>
+            <p class="foot" id="connect-key-note">登录只保留会话，不保留 KEY 明文。已保存过 KEY 的，直接粘贴激活；没有保存的，才用「重新生成 KEY」。重新生成会立刻作废旧 KEY。</p>
+            <pre id="connect-key" class="diff hidden"></pre>
+            <label for="connect-existing-key">已有 KEY</label>
+            <input id="connect-existing-key" type="password" placeholder="粘贴已保存的 KEY" autocomplete="off" />
+            <div class="row">
+              <button type="button" class="btn primary" id="use-existing-key">用已有 KEY 激活</button>
+              <button type="button" class="btn" id="reissue-key">重新生成 KEY</button>
+            </div>
+            <p class="state" id="connect-key-state"></p>
             <p class="sku" id="connect-url"></p>
-            <div class="row"><button type="button" class="btn" id="reissue-key">重新生成</button></div>
-            <p class="state" id="connect-state"></p>
           </div>
         </section>
 
@@ -266,8 +261,18 @@
         <section id="form" class="view">
           <h1 id="form-title">上架新产品</h1>
           <p class="lead" id="form-lead">先选类型。用不到的项不出现。必填未填或内容不合格，不会进入审核。旁边的英文是提交字段名。打包规范由商店 MCP 的 get_spec 下发。</p>
+          <nav class="form-nav" aria-label="表单分组">
+            <a href="#form-identity">身份</a>
+            <a href="#form-about">阐述</a>
+            <a href="#form-scope">适用</a>
+            <a href="#plugin-fields">插件</a>
+            <a href="#invoke-group">调用</a>
+            <a href="#depends-group">依赖</a>
+            <a href="#secrets-group">密钥</a>
+            <a href="#artifact-group">制品</a>
+          </nav>
           <form id="sheet">
-            <div class="group">
+            <div class="group" id="form-identity">
               <h2>身份</h2>
               <label for="f-id">产品 id <span class="name">id</span> <abbr class="req">必填</abbr></label>
               <input id="f-id" name="id" aria-required="true" />
@@ -292,7 +297,7 @@
               <input id="f-author" name="author.display_name" aria-required="true" />
               <p class="foot" id="author-card">提交者信息由登录账号自动写入，用于贡献分析。</p>
             </div>
-            <div class="group">
+            <div class="group" id="form-about">
               <h2>阐述</h2>
               <label for="f-title">标题 <span class="name">title</span> <abbr class="req">必填</abbr></label>
               <input id="f-title" name="title" aria-required="true" />
@@ -303,7 +308,7 @@
               <label for="f-changes">这一版的变更 <span class="name">changes</span> <abbr class="req">必填</abbr></label>
               <textarea id="f-changes" name="changes" aria-required="true"></textarea>
             </div>
-            <div class="group">
+            <div class="group" id="form-scope">
               <h2>适用</h2>
               <label for="f-platforms">适用平台 <span class="name">platforms</span> <abbr class="req">必填</abbr></label>
               <input id="f-platforms" name="platforms" placeholder="any 或 darwin-arm64,windows-amd64" aria-required="true" />

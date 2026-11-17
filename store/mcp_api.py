@@ -20,7 +20,11 @@ PUBLISHER = (
     "get_submission",
     "withdraw",
 )
-ADMIN = ("list_reviews", "get_review", "review_plugin", "approve", "reject", "unpublish", "transfer_namespace", "list_audit", "list_contributions")
+REVIEWER = (
+    "list_reviews", "get_review", "review_plugin", "approve", "reject",
+    "unpublish", "list_audit", "list_contributions",
+)
+ADMIN = ("transfer_namespace",)
 
 _SCHEMAS: dict[str, dict] = {
     "get_spec": {
@@ -151,7 +155,7 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["submission_id"],
     },
     "review_plugin": {
-        "description": "记录插件审核清单。只有 admin 能调，不能审自己提交的插件。checklist 必须逐项为 true；记录后 approve 才放行。",
+        "description": "记录插件审核清单。只有审核/管理员能调，不能审自己提交的插件。checklist 必须逐项为 true；记录后 approve 才放行。",
         "properties": {
             "submission_id": {"type": "string"},
             "checklist": {"type": "object", "description": "逐项为 true 的审核清单。"},
@@ -448,7 +452,9 @@ def _instructions(role: str | None) -> str:
 
 def _visible(role: str | None) -> tuple[str, ...]:
     if role == "admin":
-        return PUBLIC + PUBLISHER + ADMIN
+        return PUBLIC + PUBLISHER + REVIEWER + ADMIN
+    if role == "reviewer":
+        return PUBLIC + PUBLISHER + REVIEWER
     if role == "publisher":
         return PUBLIC + PUBLISHER
     return PUBLIC

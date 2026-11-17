@@ -27,8 +27,8 @@ class AuthMixin:
         with self._lock:
             return self._create_principal(name, role)
     def _create_principal(self, name: str, role: str) -> tuple[Principal, str]:
-        if role not in {"publisher", "admin"}:
-            raise StoreError("ROLE_FORBIDDEN", "角色只能是 publisher 或 admin")
+        if role not in {"publisher", "reviewer", "admin"}:
+            raise StoreError("ROLE_FORBIDDEN", "角色只能是 publisher、reviewer 或 admin")
         token = secrets.token_urlsafe(32)
         principal = Principal(secrets.token_hex(8), name, role)
         self._db.execute(
@@ -326,7 +326,7 @@ class AuthMixin:
     def _change_password(self, token: str, old_password: str, new_password: str) -> dict:
         from store.accounts import key_matches, make_key, password_of
 
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有本人能修改自己的口令。")
@@ -367,7 +367,7 @@ class AuthMixin:
     ) -> dict:
         from store.accounts import optional_text, person_name
 
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有栖林用户能改自己的资料。")
@@ -390,7 +390,7 @@ class AuthMixin:
         with self._lock:
             return self._issue_account_key(token)
     def _issue_account_key(self, token: str) -> tuple[dict, str, str]:
-        principal = self._require(token, {"publisher", "admin"})
+        principal = self._require(token, {"publisher", "reviewer", "admin"})
         row = self._db.execute("SELECT id FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有本人能重新生成自己的 KEY。")
@@ -444,8 +444,8 @@ class AuthMixin:
     def set_account_role(self, token: str, account_id: str, role: str) -> None:
         with self._lock:
             admin = self._require(token, {"admin"})
-            if role not in {"publisher", "admin"}:
-                raise StoreError("ROLE_FORBIDDEN", "角色只能是作者或审核。")
+            if role not in {"publisher", "reviewer", "admin"}:
+                raise StoreError("ROLE_FORBIDDEN", "角色只能是作者、审核或管理员。")
             row = self._account_row(account_id)
             if row["role"] == "admin" and role != "admin":
                 self._keep_an_admin(row["id"])
