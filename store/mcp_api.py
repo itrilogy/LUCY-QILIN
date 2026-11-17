@@ -37,7 +37,7 @@ _SCHEMAS: dict[str, dict] = {
         "description": "查找已发布产品。返回每个产品当前匹配的最高版本，含 id、kind、title、summary、author。summary 是这份产品能做什么。runtime 默认不在货架上。不把旧版本折进这一条。要看全文用 describe。",
         "properties": {
             "query": {"type": "string", "description": "名称、摘要或 id 的关键词。空着则列出货架。"},
-            "kind": {"type": "string", "description": "skill、mcp、mcp+skill、knowledge、plugin。不传则都要。runtime 不在默认货架。"},
+            "kind": {"type": "string", "description": "skill、mcp、mcp+skill、knowledge、plugin；runtime 需显式传。不传则返回除 runtime 外的全部。"},
             "client": {"type": "string", "description": "适用的 AI 工具，例如 reasonix。"},
             "platform": {"type": "string", "description": "适用平台，例如 darwin-arm64。"},
             "limit": {"type": "integer", "description": "最多返回几条。不传则全部。"},
