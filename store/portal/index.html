@@ -18,7 +18,7 @@
     button, input, select, textarea { font: inherit; color: inherit; }
     button { cursor: pointer; }
     :focus-visible { outline: 2px solid var(--color-accent, var(--luxi-cyan)); outline-offset: 2px; }
-    .app { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
+    .app { display: grid; grid-template-rows: auto 1fr; min-height: 100%; }
     .top {
       display: flex; align-items: center; gap: 12px;
       padding: 0 16px;
@@ -211,6 +211,31 @@
     .diff-del { color: var(--text-danger); }
     .diff-hunk { color: var(--text-muted); }
     .file-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .nav {
+        flex-direction: row; overflow-x: auto;
+        border-right: 0; border-bottom: 1px solid var(--border-line);
+        padding: 8px; gap: 4px;
+      }
+      .nav button { flex: 0 0 auto; height: 32px; padding: 0 10px; white-space: nowrap; }
+      .main { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      .split { grid-template-columns: 1fr; }
+      .kv { grid-template-columns: 1fr; gap: 2px 12px; }
+      table { display: block; overflow-x: auto; }
+      .top { flex-wrap: wrap; padding: 8px 12px; }
+      .top-spacer { flex: 1 1 auto; }
+      .market input { width: 100%; }
+    }
+    @media (max-width: 600px) {
+      h1 { font-size: 24px; }
+      h2 { font-size: 19px; }
+      .main { padding: 12px; }
+      .card { padding: 14px; }
+      .btn { padding: 0 12px; }
+      .slogan { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -249,7 +274,7 @@
             <div class="top-spacer"></div>
             <button type="button" class="btn" id="new-product">上架新产品</button>
           </div>
-          <p class="lead" id="identity-hint">货架只陈列已经发布的技能、MCP 和知识包。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。</p>
+          <p class="lead" id="identity-hint">货架陈列已经发布的技能、MCP、知识包与插件。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。</p>
           <p class="foot" id="identity-note">本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。</p>
           <div class="market">
             <input id="query" placeholder="搜名称、一句话或产品 id" aria-label="搜索货架" />
@@ -260,6 +285,7 @@
               <button type="button" data-kind="mcp" aria-pressed="false">MCP</button>
               <button type="button" data-kind="mcp+skill" aria-pressed="false">技能与 MCP</button>
               <button type="button" data-kind="knowledge" aria-pressed="false">知识包</button>
+              <button type="button" data-kind="plugin" aria-pressed="false">插件</button>
             </div>
             <span class="count" id="shelf-count"></span>
           </div>
@@ -826,7 +852,7 @@
           return;
         }
         setState(stateId, "", false);
-        if (count && which === "shelf") count.textContent = `在架 ${items.length}`;
+        if (count && which === "shelf") count.textContent = `在架 ${Number.isFinite(data.total) ? data.total : items.length}`;
         items.forEach((item) => grid.append(card(item, which)));
       } catch (error) {
         setState(stateId, error.message, true);
@@ -834,6 +860,11 @@
     }
 
     document.getElementById("query").addEventListener("change", () => loadCatalog("shelf"));
+    document.getElementById("query").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      loadCatalog("shelf");
+    });
     document.getElementById("search").addEventListener("click", () => loadCatalog("shelf"));
     document.getElementById("kind-chips").addEventListener("click", (event) => {
       const button = event.target.closest("button[data-kind]");
@@ -991,6 +1022,7 @@
       if (form === "list_tools") return "连上之后，向服务器要工具列表。";
       if (form === "documented") return "工具名已经写在清单里。";
       if (form === "exec_bin") return `执行 ${(manifest.runtime || {}).bin_name || "这个二进制"}。`;
+      if (form === "install_plugin") return "在 DSH 的 Plugins 里安装；商店只暂存并核对文件，不执行插件代码。";
       return form || "没有调用说明。";
     }
 
