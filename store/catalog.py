@@ -354,8 +354,8 @@ class CatalogMixin:
         self._require(token, {"reviewer", "admin"})
         rows = self._db.execute(
             """
-            SELECT id, package_id, version, status, submit_kind, manifest_json
-            FROM submissions WHERE status = 'pending'
+            SELECT id, package_id, version, status, submit_kind, manifest_json, created_at
+            FROM submissions WHERE status = 'pending' ORDER BY created_at
             """
         ).fetchall()
         found = []
@@ -367,7 +367,10 @@ class CatalogMixin:
                 "version": row["version"],
                 "status": row["status"],
                 "submit_kind": row["submit_kind"],
+                "kind": manifest.get("kind") or "",
                 "title": manifest.get("title") or "",
+                "author": manifest.get("author") if isinstance(manifest.get("author"), dict) else {},
+                "created_at": row["created_at"],
             })
         return found
     def list_audit(

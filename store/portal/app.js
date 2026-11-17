@@ -1220,8 +1220,9 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           button.type = "button";
           button.className = "list-btn";
           button.append(text("strong", item.title || item.package_id));
-          button.append(document.createElement("br"));
-          button.append(text("span", `${item.status} · ${item.submit_kind} · ${item.package_id}`, "foot"));
+          button.append(text("span", `${item.package_id}@${item.version} · ${KIND_LABEL[item.kind] || item.kind} · ${item.submit_kind}`, "foot"));
+          const author = item.author || {};
+          button.append(text("span", `提交：${author.nickname || author.real_name || author.username || "未记录"} · ${author.department || "未写部门"}`, "foot"));
           button.addEventListener("click", () => openReview(item.id, button));
           queue.append(button);
         });
@@ -1253,11 +1254,14 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         const sheetData = await api("/v1/reviews/" + submissionId);
         detail.replaceChildren();
         const head = document.createElement("div");
-        head.className = "group";
+        head.className = "group review-head";
         const tags = document.createElement("div");
         tags.className = "tags";
-        tags.append(text("span", "待审核", "tag gold"));
-        head.append(tags);
+        tags.append(text("span", "待审核", "tag gold"), text("span", KIND_LABEL[sheetData.manifest.kind] || sheetData.manifest.kind || "", "tag"));
+        head.append(tags, text("h2", sheetData.manifest.title || sheetData.manifest.id || ""));
+        head.append(text("p", `${sheetData.manifest.id}@${sheetData.manifest.version} · ${sheetData.submit_kind}`, "sku"));
+        const headAuthor = sheetData.manifest.author || {};
+        head.append(text("p", `提交者：${headAuthor.nickname || headAuthor.real_name || headAuthor.username || "未记录"} · ${headAuthor.department || "未写部门"} · ${headAuthor.username || ""}`, "foot"));
         detail.append(head, sheet(sheetData.manifest, sheetData.submit_kind));
         const checks = document.createElement("div");
         checks.className = "group";
@@ -1320,7 +1324,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           pluginReviewGroup.append(record, reviewState);
         }
         const actions = document.createElement("div");
-        actions.className = "row";
+        actions.className = "row review-actions";
         const publish = text("button", "发布", "btn primary");
         publish.type = "button";
         publish.disabled = !reviewReady;
@@ -1361,9 +1365,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           }
         });
         actions.append(publish, reject);
+        const actionGroup = document.createElement("div");
+        actionGroup.className = "group";
+        actionGroup.append(text("h2", "审核动作"), actions, text("label", "退回原因"), reason, note);
         detail.append(checks);
         if (pluginReviewGroup) detail.append(pluginReviewGroup);
-        detail.append(diff, actions, text("label", "退回原因"), reason, note);
+        detail.append(diff, actionGroup);
         const files = document.createElement("div");
         files.className = "group";
         files.append(text("h2", "制品"));
@@ -1622,37 +1629,6 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       }
     }
 
-    async function useExistingKey() {
-      const input = document.getElementById("connect-existing-key");
-      const key = input.value.trim();
-      if (!key) {
-        setState("connect-key-state", "先粘贴已保存的 KEY。", true);
-        return;
-      }
-      try {
-        const response = await fetch("/v1/me", {
-          headers: { Authorization: "Bearer " + key },
-          credentials: "same-origin",
-        });
-        if (!response.ok) throw new Error("这把 KEY 无效或已失效。");
-        const me = await response.json();
-        if (state.userId && me.id !== state.userId) {
-          throw new Error("这把 KEY 不属于当前登录账号。");
-        }
-        await api("/v1/account/remember-key", {
-          method: "POST",
-          body: JSON.stringify({ key }),
-        });
-        state.issued = { key };
-        input.value = "";
-        setState("connect-key-state", "", false);
-        renderConnect();
-      } catch (error) {
-        setState("connect-key-state", error.message, true);
-      }
-    }
-
-    document.getElementById("use-existing-key").addEventListener("click", useExistingKey);
     document.getElementById("reissue-key").addEventListener("click", () => issueKey("connect-key-state"));
 
     function connectBase() {
@@ -1800,7 +1776,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       if (issued) keyNode.textContent = state.issued.key;
       document.getElementById("connect-key-note").textContent = issued
         ? "KEY 已保存。发布标签直接带这把 KEY，重新进入本页也会显示；需要换 KEY 时重新生成，旧 KEY 会立即失效。"
-        : "登录只保留会话，不保留 KEY 明文。已保存过 KEY 的，直接粘贴激活；没有保存的，才用「重新生成 KEY」。重新生成会立刻作废旧 KEY。";
+        : "这个账号还没有 KEY 明文（旧库）。点「重新生成 KEY」一次；之后进入本页会直接显示。重新生成会立刻作废旧 KEY。";
       document.getElementById("connect-url").textContent = signed ? (state.mcpUrl || "") : "";
       renderConnectTabs();
     }

@@ -257,3 +257,9 @@
 .form-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; max-width: 980px; }
 .form-nav a { padding: 4px 10px; border: 1px solid var(--border-line); border-radius: 999px; color: var(--text-secondary, var(--text-primary)); text-decoration: none; font-size: 12px; }
 .form-nav a:hover { border-color: var(--border-strong); }
+
+.review-head h2 { margin: 4px 0; }
+.review-head .tags { margin-bottom: 8px; }
+.review-actions { position: sticky; bottom: 0; background: var(--bg-card); padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+.list-btn strong { display: block; margin-bottom: 2px; }
+.list-btn .foot { display: block; }

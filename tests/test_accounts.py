@@ -61,17 +61,6 @@ class AccountTests(unittest.TestCase):
         self._post(f"/v1/accounts/{author_row['id']}/role", {"role": "admin"}, cookie=admin_cookie)
         self.assertEqual(self._get("/v1/me", self._login("author.one"))["role"], "admin")
 
-    def test_existing_key_can_be_remembered_for_legacy_accounts(self) -> None:
-        _admin, cookie, key = self._create("admin.one", "沈林", "林深")
-        self.store._db.execute("UPDATE accounts SET key_plain = NULL WHERE username = ?", ("admin.one",))
-        self.store._db.commit()
-        self.assertEqual(self._get("/v1/me", cookie)["store_key"], "")
-        wrong = self._raw("/v1/account/remember-key", {"key": "wrong-key-value"}, cookie=cookie)
-        self.assertIn(wrong[0], {400, 403})
-        remembered = self._raw("/v1/account/remember-key", {"key": key}, cookie=cookie)
-        self.assertEqual(remembered[0], 200, remembered[1])
-        self.assertEqual(self._get("/v1/me", cookie)["store_key"], key)
-
     def test_key_is_the_bearer_and_reissue_replaces_the_only_one(self) -> None:
         _admin, cookie, key = self._create("admin.one", "沈林", "林深")
         me = self._send("/v1/me", bearer=key)

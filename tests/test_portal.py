@@ -69,7 +69,6 @@ class PortalApiTests(unittest.TestCase):
         self.assertIn('data-tab="generic-publish"', page)
         self.assertIn('id="connect-keypanel"', page)
         self.assertIn('id="reissue-key"', page)
-        self.assertIn('id="use-existing-key"', page)
         self.assertIn('id="author-card"', page)
         self.assertIn('id="contributions"', page)
         self.assertIn('id="nav-contributions"', page)

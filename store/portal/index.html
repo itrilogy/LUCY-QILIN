@@ -238,12 +238,9 @@
           </div>
           <div class="group hidden" id="connect-keypanel">
             <h2>KEY 与发布配置</h2>
-            <p class="foot" id="connect-key-note">登录只保留会话，不保留 KEY 明文。已保存过 KEY 的，直接粘贴激活；没有保存的，才用「重新生成 KEY」。重新生成会立刻作废旧 KEY。</p>
+            <p class="foot" id="connect-key-note">KEY 明文已持久化，进入本页会直接显示。只有旧库账号第一次需要点「重新生成 KEY」一次。</p>
             <pre id="connect-key" class="diff hidden"></pre>
-            <label for="connect-existing-key">已有 KEY</label>
-            <input id="connect-existing-key" type="password" placeholder="粘贴已保存的 KEY" autocomplete="off" />
             <div class="row">
-              <button type="button" class="btn primary" id="use-existing-key">用已有 KEY 激活</button>
               <button type="button" class="btn" id="reissue-key">重新生成 KEY</button>
             </div>
             <p class="state" id="connect-key-state"></p>
