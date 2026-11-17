@@ -644,7 +644,7 @@
   </dialog>
   <script>
     const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", "windows-arm64", "windows-amd64"];
-    const KIND_LABEL = { skill: "技能", mcp: "MCP", "mcp+skill": "技能与 MCP", runtime: "运行时", knowledge: "知识包" };
+    const KIND_LABEL = { skill: "技能", mcp: "MCP", "mcp+skill": "技能与 MCP", runtime: "运行时", knowledge: "知识包", plugin: "插件" };
     const ROLE_LABEL = { admin: "审核", publisher: "作者", member: "未授权" };
     const SECURITY_LABEL = { public: "公开", internal: "内部", restricted: "受限", confidential: "机密" };
     const SCOPE_LABEL = { enterprise: "企业", work: "工作产出" };
@@ -953,6 +953,18 @@
           ["语言 / 许可", [knowledge.language, knowledge.license].filter(Boolean).join(" / ")],
           ["生产溯源", knowledge.producer || ""],
           ["本地主题", (knowledge.topics || []).join("、")],
+        ]]);
+      }
+      const plugin = manifest.plugin;
+      if (plugin) {
+        groups.push(["插件", [
+          ["分级", plugin.tier || ""],
+          ["形态", plugin.form || ""],
+          ["入口", plugin.entry || plugin.client || ""],
+          ["补丁", plugin.patch || ""],
+          ["DSH 版本", plugin.dsh || ""],
+          ["能力", (plugin.capabilities || []).join("、")],
+          ["外部命令", (plugin.external || []).join("、")],
         ]]);
       }
       groups.forEach(([title, pairs]) => {

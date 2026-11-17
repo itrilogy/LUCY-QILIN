@@ -19,7 +19,20 @@ CLIENTS: dict[str, set[str]] = {
     "reasonix": {"skill_dir", "mcp_stdio", "local_bin"},
     "claude-desktop": {"mcp_stdio", "mcp_http"},
     "cursor": {"mcp_stdio", "mcp_http"},
+    "deepseek-harness": {"skill_dir", "mcp_stdio", "mcp_http", "local_bin", "plugin"},
     "generic": set(),
 }
 
-KINDS = {"mcp", "skill", "mcp+skill", "runtime", "knowledge"}
+KINDS = {"mcp", "skill", "mcp+skill", "runtime", "knowledge", "plugin"}
+
+# 插件分级。A：零 npm 运行时依赖，可声明外部 CLI；B：白名单纯 JS 依赖；
+# C：原生模块，v1 只识别、不接受。Tier B 白名单从空开始，新增依赖要先评审，
+# 再改这里，不允许在清单里自行声明。
+PLUGIN_TIERS = {"A", "B", "C"}
+PLUGIN_TIER_B_ALLOWLIST: frozenset[str] = frozenset()
+PLUGIN_CAPABILITIES = {
+    "tools", "client-slots", "commands", "services",
+    "network", "credentials:read", "credentials:write",
+    "filesystem:read", "filesystem:write", "process:spawn",
+    "session:read", "session:write",
+}

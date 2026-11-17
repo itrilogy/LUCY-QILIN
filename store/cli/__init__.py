@@ -35,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     install.add_argument("--skills-root", type=Path)
     install.add_argument("--bin-dir", type=Path)
     install.add_argument("--mcp-dir", type=Path)
+    install.add_argument("--plugin-staging", type=Path)
     restore = sub.add_parser("restore", help="从备份恢复数据库与制品目录")
     restore.add_argument("source", type=Path)
     restore.add_argument("--db", type=Path, default=Path("var/qilin.db"))
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             skills_root=args.skills_root,
             bin_dir=args.bin_dir,
             mcp_dir=args.mcp_dir,
+            plugin_staging=args.plugin_staging,
         )
     if args.command == "backup":
         manifest = run_backup(args.db, args.blobs, args.dest)

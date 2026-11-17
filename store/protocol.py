@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-NAMES = ("upload", "knowledge", "skill", "mcp", "mcp+skill", "runtime")
+NAMES = ("upload", "knowledge", "skill", "mcp", "mcp+skill", "runtime", "plugin")
 
 # 协议的数据文件。和散文规范分开：散文走 qilin://spec/<name>，数据走 qilin://<kind>/knowledge。
 # 这些文件随包分发；MCP 直接读，不在代码里再抄一份。
@@ -32,12 +32,13 @@ _BLURB = {
     "mcp": "纯 MCP。连接方式是 stdio 或 streamable-http。",
     "mcp+skill": "技能加 MCP。先满足两边，调用形式 load_skill_then_mcp。",
     "runtime": "商店托管的依赖。不上默认货架。只有这种可以追加平台。",
+    "plugin": "插件。Host/Client 可执行代码，按 Tier A/B/C 分级；配置式 bundle 仍走 mcp。",
 }
 
 _TEXT = {
     "upload": """上架说明。这份文本由商店 MCP 下发。技能正文和 references 不记载上架步骤。先取规范，再整理目录，再按本文上传。
 
-1. 调 get_spec。name 取要交的种类：knowledge、skill、mcp、mcp+skill、runtime。按返回的文本整理目录根上的 manifest.json 和文件。不要另造字段，也不要去技能文件里找上架步骤。
+1. 调 get_spec。name 取要交的种类：knowledge、skill、mcp、mcp+skill、runtime、plugin。按返回的文本整理目录根上的 manifest.json 和文件。不要另造字段，也不要去技能文件里找上架步骤。
 2. 调 validate，只传清单。返回 ok、rules、findings。ok 为 false，或 findings 里还有 severity 为 error，就按 path 和 message 改，再 validate。还有错误就不要 begin_submit。
 3. ok 为 true 之后，在栖林仓库根执行 python -m store.cli submit <目录>。这条命令自己会 begin_submit、对返回的地址做 PUT、再 finish_submit。不要自己编 curl。已经用了这条命令，就不要再手动 begin_submit，以免交成两条。
 4. 钥匙只来自环境变量 QILIN_STORE_KEY。不进命令行，不进命令输出，不写进笔记、清单或记忆。命令不生成钥匙。这不是登录口令，也不是 QILIN_HUB_SECRET。地址用 QILIN_STORE_URL，不设则是 http://127.0.0.1:8787。
@@ -101,6 +102,30 @@ invoke.form 必须是 load_skill_then_mcp。先加载技能，再由技能去调
 连接可以写在本包的 mcp 块里。若要先装本商店已发布的另一个 MCP，写进 depends.mcp，带 id 和版本范围。未发布则 DEP_STORE_UNPUBLISHED。
 
 安装顺序固定，作者不能改：商店托管依赖，外部依赖检查，depends.skills，depends.mcp，本包的连接，解压技能，索要密钥名，验证。""",
+    "plugin": """插件规范。kind 为 plugin。只收 DSH 的 Host/Client 可执行代码；只插入 MCP 连接的配置式 bundle 仍走 mcp，不算插件。
+
+目录根上必须有 manifest.json、package.json，以及清单声明的运行文件。不要子目录越界、符号链接、.node 原生模块或可执行二进制。
+
+包级：
+- plugin.tier 必填：A（零 npm 运行时依赖，可声明外部 CLI）、B（白名单内的纯 JS 依赖）、C（原生模块，当前不接受）。
+- plugin.form 必填：host、client 或 both。form 为 host 时 plugin.entry 必须存在；为 client 时 plugin.client 必须存在；both 两者都要。
+- plugin.patch 必填，指向 cordis.patch.yml。
+- plugin.files 必填，列出所有运行文件；entry、client、patch、locale、icon 都要在里面。
+- plugin.dsh 必填，写 DSH 版本范围，例如 >=1.5 <2。
+- plugin.capabilities 可选，取 tools、client-slots、commands、services、network、credentials:read、credentials:write、filesystem:read、filesystem:write、process:spawn、session:read、session:write。声明只供审核对照，不是运行时权限。
+- plugin.external 可选，列出需要的外部命令名（如 rg、pandoc）；写了就要求 capabilities 含 process:spawn。安装器只检查命令在 PATH，不自动安装。
+
+package.json：
+- version 必须与清单 version 相同；name 只要求是合法 npm 包名。
+- scripts 必须为空，不允许 postinstall、prepare、build。
+- Tier A：dependencies / optionalDependencies 必须为空；peerDependencies 只能是 @deepseek-ai/*。
+- Tier B：dependencies 只能是商店白名单里的纯 JS 包；optionalDependencies 为空；peerDependencies 只能是 @deepseek-ai/*。
+- Tier C：当前拒绝（PLUGIN_TIER）。
+- 不允许 .node 文件或 binding.gyp。
+
+调用形式固定为 { "form": "install_plugin" }。商店只产出下载、plugin_stage、plugin_confirm 与 verify，不执行安装；实际安装由用户在 DSH 的 Plugins 里确认，或让 agent 调 plugin_manager install_bundle。
+
+平台的 platforms 只允许 any（纯 JS）；原生模块和平台二进制不在 v1 范围。""",
     "runtime": """运行时规范。kind 为 runtime。这是商店托管的命令或字体一类依赖，不出现在默认货架。只有显式 kind=runtime 才查得到。
 
 - platforms 禁止 any。规则 PLATFORM_TOO_BROAD。每个 platform 都要有对应的 runtime.assets 条目：platform、path、sha256。缺了则 RUNTIME_ASSET。

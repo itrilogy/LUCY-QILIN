@@ -16,6 +16,9 @@ OPS = (
     "ensure_product",
     "need_secret",
     "verify",
+    "plugin_stage",
+    "plugin_confirm",
+    "check_bin",
 )
 
 
@@ -128,6 +131,8 @@ def install_plan(
         steps.extend(_archive_steps(found, base_url, "KNOWLEDGE_ROOT"))
     if found["manifest"].get("kind") == "runtime":
         steps.extend(_runtime_steps(found, platform, base_url))
+    if found["manifest"].get("kind") == "plugin":
+        steps.extend(_plugin_steps(found, base_url))
     for item in found["manifest"].get("secrets") or []:
         steps.append({
             "op": "need_secret",
@@ -197,6 +202,45 @@ def _product_dependency(
     return list(nested["steps"])
 
 
+def _plugin_steps(release: dict, base_url: str) -> list[dict]:
+    manifest = release["manifest"]
+    block = manifest.get("plugin") if isinstance(manifest.get("plugin"), dict) else {}
+    digest = release.get("artifact_sha256")
+    if not digest:
+        raise PlanError("CHECKSUM", "已发布的插件没有制品校验和")
+    entry = block.get("entry") if isinstance(block.get("entry"), str) else None
+    client = block.get("client") if isinstance(block.get("client"), str) else None
+    patch = str(block.get("patch") or "")
+    archive = f"${{WORK}}/{release['id']}/{release['version']}.zip"
+    staging = f"${{PLUGIN_STAGING}}/{release['id']}/{release['version']}"
+    steps: list[dict] = [{
+        "op": "download",
+        "url": _artifact_url(base_url, release["id"], release["version"], None),
+        "sha256": digest,
+        "dest": archive,
+    }]
+    for name in block.get("external") or []:
+        if isinstance(name, str) and name.strip():
+            steps.append({"op": "check_bin", "name": name.strip()})
+    steps.append({
+        "op": "plugin_stage",
+        "src": archive,
+        "dest": staging,
+        "id": release["id"],
+        "version": release["version"],
+        "entry": entry,
+        "client": client,
+        "patch": patch,
+    })
+    steps.append({
+        "op": "plugin_confirm",
+        "id": release["id"],
+        "version": release["version"],
+        "path": staging,
+    })
+    return steps
+
+
 def _runtime_steps(release: dict, platform: str, base_url: str) -> list[dict]:
     manifest = release["manifest"]
     block = manifest.get("runtime") or {}
@@ -246,6 +290,9 @@ def _verify_step(release: dict, package_id: str, version: str) -> dict:
     entry = (manifest.get("skill") or {}).get("entry")
     if kind == "knowledge":
         entry = (manifest.get("knowledge") or {}).get("entry")
+    if kind == "plugin":
+        block = manifest.get("plugin") or {}
+        entry = block.get("entry") or block.get("client")
     step: dict = {
         "op": "verify",
         "id": package_id,
@@ -253,6 +300,10 @@ def _verify_step(release: dict, package_id: str, version: str) -> dict:
         "kind": kind,
         "entry": entry,
     }
+    if kind == "plugin":
+        step["plugin_root"] = f"${{PLUGIN_STAGING}}/{package_id}/{version}"
+        step["patch"] = (manifest.get("plugin") or {}).get("patch")
+        return step
     if kind not in {"mcp", "mcp+skill"}:
         return step
     block = manifest.get("mcp") or {}

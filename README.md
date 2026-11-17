@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/itrilogy/LUCY-QILIN/actions/workflows/ci.yml/badge.svg)](https://github.com/itrilogy/LUCY-QILIN/actions/workflows/ci.yml)
 
-本仓库是栖林商店：一个 Python 进程，同时提供门户页面、HTTP 接口和商店 MCP。制品与账号存在本机的 SQLite 和目录里。规格在 [agent-store-design.md](agent-store-design.md)。
+本仓库是栖林商店：一个 Python 进程，同时提供门户页面、HTTP 接口和商店 MCP。制品与账号存在本机的 SQLite 和目录里。产品种类：`skill`、`mcp`、`mcp+skill`、`runtime`、`knowledge`、`plugin`。规格在 [agent-store-design.md](agent-store-design.md)。
 
 运行时基础安装只用 Python 标准库。枢纽令牌验签需要 `cryptography`，装在 `hub` extra 里：`pip install -e '.[hub]'`。设计目标是 Python 3.11 及以上。自动化测试另需 `pytest`。
 

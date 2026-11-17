@@ -19,7 +19,7 @@ from store.safety import PathEscape, check_relative, safe_join
 _PUBLIC_MANIFEST_KEYS = (
     "spec_version", "id", "version", "kind", "title", "summary", "description",
     "changes", "author", "platforms", "clients", "depends", "secrets", "invoke",
-    "knowledge", "skill", "mcp", "runtime",
+    "knowledge", "skill", "mcp", "runtime", "plugin",
 )
 _PREVIEW_LIMIT = 64 * 1024
 

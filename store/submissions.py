@@ -569,6 +569,13 @@ class SubmissionMixin:
         namespace_owner = self._namespace_owner(namespace, persist=True)
         if namespace_owner is not None and namespace_owner != publisher.id:
             raise StoreError("ROLE_FORBIDDEN", f"命名空间 {namespace} 已经由别的发布者使用")
+        if stored.get("kind") == "plugin":
+            plugin = stored.get("plugin") if isinstance(stored.get("plugin"), dict) else {}
+            tier = plugin.get("tier")
+            if tier == "C":
+                raise StoreError("PLUGIN_TIER", "Tier C（原生模块）当前不接受")
+            if tier == "B" and publisher.role != "admin":
+                raise StoreError("ROLE_FORBIDDEN", "Tier B 目前只接受 admin 或白名单作者")
         if submit_kind == "new_version" and self._release_exists(package_id, version):
             raise StoreError("VERSION_IMMUTABLE", "该版本已发布，不能覆盖")
         if submit_kind == "add_platform":

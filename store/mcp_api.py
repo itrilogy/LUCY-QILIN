@@ -24,11 +24,11 @@ ADMIN = ("list_reviews", "get_review", "approve", "reject", "unpublish", "transf
 
 _SCHEMAS: dict[str, dict] = {
     "get_spec": {
-        "description": "读取商店下发的上架规范全文。打包之前先调这个。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime。规范不在技能正文或 references 里，不要去那里找上架步骤。返回的 text 与校验器是同一套，不要另造规则。",
+        "description": "读取商店下发的上架规范全文。打包之前先调这个。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime、plugin。规范不在技能正文或 references 里，不要去那里找上架步骤。返回的 text 与校验器是同一套，不要另造规则。",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "upload 是上架顺序。其余五个是种类规范。",
+                "description": "upload 是上架顺序。其余六个是种类规范。",
             },
         },
         "required": ["name"],
@@ -192,7 +192,7 @@ _SCHEMAS: dict[str, dict] = {
 
 _SHELF = (
     "栖林是技能、MCP 和知识包的货架。商店不运行它们，也不在这台服务器上执行安装。"
-    "打包和上架的规范不在技能正文里。先 get_spec，name 取 upload、knowledge、skill、mcp、mcp+skill、runtime 之一；"
+    "打包和上架的规范不在技能正文里。先 get_spec，name 取 upload、knowledge、skill、mcp、mcp+skill、runtime、plugin 之一；"
     "或读取资源 qilin://spec/ 加上这个名字。按返回的文本整理目录。"
     "看有什么：search 给出已发布产品的名称、摘要和当前最高版本。"
     "要看一份产品能做什么，用 describe，version 必须是精确号。"
@@ -298,7 +298,7 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
         spec_name = str(arguments.get("name") or "")
         body = text(spec_name)
         if body is None:
-            raise StoreError("SPEC_UNKNOWN", "没有这份规范。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime")
+            raise StoreError("SPEC_UNKNOWN", "没有这份规范。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime、plugin")
         return {"name": spec_name, "text": body}
     if name == "search":
         return store.search_page(

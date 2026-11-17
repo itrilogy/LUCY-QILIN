@@ -35,6 +35,9 @@ KNOWN = {
     "ensure_product",
     "need_secret",
     "verify",
+    "plugin_stage",
+    "plugin_confirm",
+    "check_bin",
 }
 
 
@@ -48,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skills-root", type=Path)
     parser.add_argument("--bin-dir", type=Path)
     parser.add_argument("--mcp-dir", type=Path)
+    parser.add_argument("--plugin-staging", type=Path)
     args = parser.parse_args(argv)
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     return run(
@@ -57,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         skills_root=args.skills_root,
         bin_dir=args.bin_dir,
         mcp_dir=args.mcp_dir,
+        plugin_staging=args.plugin_staging,
     )
 
 
@@ -69,6 +74,7 @@ def run(
     knowledge_root: Path | None = None,
     bin_dir: Path | None = None,
     mcp_dir: Path | None = None,
+    plugin_staging: Path | None = None,
     opener: Callable[..., object] | None = None,
 ) -> int:
     steps = plan.get("steps") if isinstance(plan, dict) else None
@@ -81,6 +87,7 @@ def run(
         "KNOWLEDGE_ROOT": knowledge_root or _env_path("QILIN_KNOWLEDGE_ROOT"),
         "BIN_DIR": bin_dir or _env_path("QILIN_BIN_DIR"),
         "MCP_DIR": mcp_dir or _env_path("QILIN_MCP_DIR"),
+        "PLUGIN_STAGING": plugin_staging or _env_path("QILIN_PLUGIN_STAGING"),
     }
     for step in steps:
         if not isinstance(step, dict) or step.get("op") not in KNOWN:
@@ -207,6 +214,60 @@ def _need_secret(step: dict, _opener: Callable[..., object]) -> int:
     return 0
 
 
+def _plugin_stage(step: dict, _opener: Callable[..., object]) -> int:
+    src = Path(str(step.get("src") or ""))
+    dest = Path(str(step.get("dest") or ""))
+    if not src.is_file():
+        print(f"没有找到插件制品 {src}", file=sys.stderr)
+        return 1
+    if dest.exists() and any(dest.iterdir()):
+        print(f"插件暂存目录不是空的：{dest}", file=sys.stderr)
+        return 1
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        safe_extract(src, dest)
+    except (zipfile.BadZipFile, ValueError, OSError):
+        print("插件制品不是合法压缩包", file=sys.stderr)
+        return 1
+    package_path = dest / "package.json"
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print("插件缺少合法的 package.json", file=sys.stderr)
+        return 1
+    if package.get("version") != step.get("version"):
+        print("package.json 的 version 与计划不一致", file=sys.stderr)
+        return 1
+    for key in ("entry", "client", "patch"):
+        relative = step.get(key)
+        if relative and not (dest / str(relative)).is_file():
+            print(f"插件缺少 {relative}", file=sys.stderr)
+            return 1
+    print(f"已暂存插件到 {dest}")
+    return 0
+
+
+def _plugin_confirm(step: dict, _opener: Callable[..., object]) -> int:
+    path = step.get("path") or ""
+    ident = step.get("id") or ""
+    version = step.get("version") or ""
+    print(f"插件 {ident}@{version} 已暂存到 {path}")
+    print("下一步由你在 DSH 的 Plugins 里添加这个目录，或让 agent 调 plugin_manager install_bundle。")
+    print("商店和参考安装器都不会自动安装或执行插件代码。")
+    return 0
+
+
+def _check_bin(step: dict, _opener: Callable[..., object]) -> int:
+    name = str(step.get("name") or "")
+    if not name:
+        return 1
+    if shutil.which(name):
+        print(f"已找到外部命令 {name}")
+        return 0
+    print(f"缺少外部命令 {name}，请先安装并放进 PATH", file=sys.stderr)
+    return 1
+
+
 def _verify(step: dict, opener: Callable[..., object]) -> int:
     entry = step.get("entry")
     if step.get("kind") in {"skill", "mcp+skill", "knowledge"} and entry:
@@ -219,6 +280,18 @@ def _verify(step: dict, opener: Callable[..., object]) -> int:
         if not target.is_file():
             print(f"没有找到入口 {target}", file=sys.stderr)
             return 1
+    if step.get("kind") == "plugin":
+        root_value = step.get("plugin_root")
+        if not root_value:
+            print("没有设置插件暂存目录", file=sys.stderr)
+            return 1
+        root = Path(str(root_value))
+        for key in ("entry", "patch"):
+            relative = step.get(key)
+            if relative and not (root / str(relative)).is_file():
+                print(f"没有找到插件文件 {root / str(relative)}", file=sys.stderr)
+                return 1
+        return 0
     if step.get("kind") in {"mcp", "mcp+skill"}:
         return _verify_mcp(step, opener)
     return 0
@@ -421,6 +494,9 @@ _OPS = {
     "ensure_product": _ensure_product,
     "need_secret": _need_secret,
     "verify": _verify,
+    "plugin_stage": _plugin_stage,
+    "plugin_confirm": _plugin_confirm,
+    "check_bin": _check_bin,
 }
 
 
@@ -453,7 +529,7 @@ def _expand(step: dict, roots: dict[str, Path | None]) -> dict | None:
             if replaced is None:
                 return None
             expanded[key] = replaced
-    for name in ("BIN_DIR", "MCP_DIR", "SKILLS_ROOT", "KNOWLEDGE_ROOT"):
+    for name in ("BIN_DIR", "MCP_DIR", "SKILLS_ROOT", "KNOWLEDGE_ROOT", "PLUGIN_STAGING"):
         if roots[name] is not None:
             expanded[name.lower()] = str(roots[name])
     return expanded

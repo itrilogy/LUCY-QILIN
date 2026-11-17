@@ -15,7 +15,9 @@ from store.semver import SEMVER
 from store.semver import satisfies as _satisfies
 from store.validator.knowledge import check as check_knowledge
 from store.validator.net import probe_url, url_ok
-from store.validator.registry import CLIENTS, KINDS, PLATFORMS
+from store.validator.registry import (
+    CLIENTS, KINDS, PLATFORMS, PLUGIN_CAPABILITIES, PLUGIN_TIER_B_ALLOWLIST, PLUGIN_TIERS,
+)
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(\.[a-z0-9][a-z0-9-]*)+$")
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -159,7 +161,7 @@ def _validate_manifest(
     kind = manifest.get("kind")
     # 清单来自外部。kind 若是数组或对象，直接查集合会抛 TypeError 并打断请求。
     if not isinstance(kind, str) or kind not in KINDS:
-        report.add("KIND", "kind", "kind 只能是 mcp、skill、mcp+skill、runtime、knowledge")
+        report.add("KIND", "kind", "kind 只能是 mcp、skill、mcp+skill、runtime、knowledge、plugin")
         kind = None
     package_id = manifest.get("id")
     if not isinstance(package_id, str) or not ID_PATTERN.fullmatch(package_id):
@@ -221,6 +223,8 @@ def _validate_manifest(
         _runtime(report, manifest, root, platforms, clients, check_files=check_files)
     if kind == "knowledge":
         check_knowledge(report, manifest, root, check_files=check_files)
+    if kind == "plugin":
+        _plugin(report, manifest, root, platforms, clients, check_files=check_files)
     if kind == "mcp" and "any" in platforms:
         local = bool(depends.get("store") or depends.get("external"))
         transport = (manifest.get("mcp") or {}).get("transport") if isinstance(manifest.get("mcp"), dict) else None
@@ -230,7 +234,12 @@ def _validate_manifest(
     _catalog_deps(report, depends.get("store") or [], releases, "runtime", "depends.store")
     _catalog_deps(report, depends.get("skills") or [], releases, "skill", "depends.skills")
     _catalog_deps(report, depends.get("mcp") or [], releases, "mcp", "depends.mcp")
-    needs_bin = kind == "runtime" or bool(depends.get("store") or depends.get("external"))
+    plugin_block = manifest.get("plugin") if isinstance(manifest.get("plugin"), dict) else {}
+    needs_bin = (
+        kind == "runtime"
+        or bool(depends.get("store") or depends.get("external"))
+        or bool(plugin_block.get("external"))
+    )
     if needs_bin:
         for client in clients:
             if "local_bin" not in CLIENTS.get(client, set()):
@@ -532,6 +541,132 @@ def _runtime(
     for client in clients:
         if "local_bin" not in CLIENTS.get(client, set()):
             report.add("CLIENT_CAPABILITY", "clients", f"{client} 不能放置本机命令")
+
+
+def _plugin(
+    report: Report,
+    manifest: dict,
+    root: Path,
+    platforms: list[str],
+    clients: list[str],
+    *,
+    check_files: bool,
+) -> None:
+    block = report.guard(
+        manifest.get("plugin"), dict, "PLUGIN_MANIFEST", "plugin", "缺少 plugin 块", None,
+    )
+    if block is None:
+        return
+    tier = block.get("tier")
+    if not isinstance(tier, str) or tier not in PLUGIN_TIERS:
+        report.add("PLUGIN_TIER", "plugin.tier", "plugin.tier 只能是 A、B 或 C")
+        tier = None
+    elif tier == "C":
+        report.add("PLUGIN_TIER", "plugin.tier", "Tier C（原生模块）当前不接受")
+    form = block.get("form")
+    if form not in {"host", "client", "both"}:
+        report.add("PLUGIN_ENTRY", "plugin.form", "plugin.form 只能是 host、client 或 both")
+        form = None
+    entry = block.get("entry")
+    client_entry = block.get("client")
+    if form in {"host", "both"} and not isinstance(entry, str):
+        report.add("PLUGIN_ENTRY", "plugin.entry", "host/both 必须写 plugin.entry")
+    if form in {"client", "both"} and not isinstance(client_entry, str):
+        report.add("PLUGIN_ENTRY", "plugin.client", "client/both 必须写 plugin.client")
+    patch = block.get("patch")
+    if not isinstance(patch, str):
+        report.add("PLUGIN_ENTRY", "plugin.patch", "必须写 plugin.patch")
+    dsh = block.get("dsh")
+    if not isinstance(dsh, str) or not dsh.strip():
+        report.add("PLUGIN_DSH_VERSION", "plugin.dsh", "必须写 DSH 版本范围，例如 >=1.5 <2")
+    raw_files = block.get("files")
+    files = report.guard(raw_files, list, "PLUGIN_ENTRY", "plugin.files", "plugin.files 必须是数组", [])
+    declared: list[str] = []
+    for index, value in enumerate(files):
+        if not isinstance(value, str):
+            report.add("PLUGIN_ENTRY", f"plugin.files[{index}]", "文件路径必须是字符串")
+            continue
+        try:
+            relative = check_relative(value)
+        except PathEscape:
+            report.add("PLUGIN_ARTIFACT", f"plugin.files[{index}]", "文件路径越出包目录")
+            continue
+        declared.append(relative)
+    for required in (entry, client_entry, patch):
+        if isinstance(required, str) and required not in declared:
+            report.add("PLUGIN_ENTRY", "plugin.files", f"运行文件 {required} 没写进 plugin.files")
+    raw_caps = block.get("capabilities") or []
+    caps = report.guard(raw_caps, list, "PLUGIN_CAPABILITY", "plugin.capabilities", "必须是数组", [])
+    for index, cap in enumerate(caps):
+        if not isinstance(cap, str) or cap not in PLUGIN_CAPABILITIES:
+            report.add("PLUGIN_CAPABILITY", f"plugin.capabilities[{index}]", f"不认识的 capability：{cap!r}")
+    raw_external = block.get("external") or []
+    external = report.guard(raw_external, list, "PLUGIN_CAPABILITY", "plugin.external", "必须是数组", [])
+    for index, name in enumerate(external):
+        if not isinstance(name, str) or not name.strip():
+            report.add("PLUGIN_CAPABILITY", f"plugin.external[{index}]", "外部命令名必须是非空字符串")
+    if any(isinstance(name, str) and name.strip() for name in external) and "process:spawn" not in caps:
+        report.add("PLUGIN_CAPABILITY", "plugin.capabilities", "声明了外部命令，就必须声明 process:spawn")
+    if "any" not in platforms:
+        report.add("PLUGIN_ARTIFACT", "platforms", "插件 v1 只能是纯 JS，platforms 必须含 any")
+    for client in clients:
+        if "plugin" not in CLIENTS.get(client, set()):
+            report.add("CLIENT_CAPABILITY", "clients", f"{client} 不能安装插件")
+    _invoke(report, manifest.get("invoke"), {"install_plugin"}, "PLUGIN_ENTRY")
+    if not check_files:
+        return
+
+    package_path = root / "package.json"
+    if not package_path.is_file():
+        report.add("PLUGIN_MANIFEST", "package.json", "缺少 package.json")
+        return
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        report.add("PLUGIN_MANIFEST", "package.json", "package.json 不是合法 JSON")
+        return
+    if not isinstance(package, dict):
+        report.add("PLUGIN_MANIFEST", "package.json", "package.json 必须是对象")
+        return
+    if package.get("version") != manifest.get("version"):
+        report.add("PLUGIN_MANIFEST", "package.json", "package.json 的 version 必须与清单一致")
+    scripts = package.get("scripts") or {}
+    if scripts:
+        report.add("PLUGIN_SCRIPT", "package.json", "不允许 scripts / install 生命周期脚本")
+    deps = package.get("dependencies") or {}
+    optional = package.get("optionalDependencies") or {}
+    peers = package.get("peerDependencies") or {}
+    if not isinstance(deps, dict) or not isinstance(optional, dict) or not isinstance(peers, dict):
+        report.add("PLUGIN_MANIFEST", "package.json", "dependencies / optionalDependencies / peerDependencies 必须是对象")
+    else:
+        if optional:
+            report.add("PLUGIN_DEPENDENCY", "package.json", "不允许 optionalDependencies")
+        for name in deps:
+            if tier == "A":
+                report.add("PLUGIN_DEPENDENCY", "package.json", f"Tier A 不允许运行时依赖：{name}")
+            elif tier == "B" and name not in PLUGIN_TIER_B_ALLOWLIST:
+                report.add("PLUGIN_DEPENDENCY", "package.json", f"依赖 {name} 不在 Tier B 白名单")
+        for name in peers:
+            if not str(name).startswith("@deepseek-ai/"):
+                report.add("PLUGIN_DEPENDENCY", "package.json", f"peerDependencies 只允许 @deepseek-ai/*：{name}")
+    total = 0
+    for path in root.rglob("*"):
+        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(root).as_posix()
+        total += path.stat().st_size
+        if path.suffix == ".node" or path.name == "binding.gyp":
+            report.add("PLUGIN_ARTIFACT", relative, "不允许原生模块或 binding.gyp")
+    if total > 16 * 1024 * 1024:
+        report.add("PLUGIN_ARTIFACT", "package", "插件包不超过 16 MiB")
+    for relative in declared:
+        try:
+            target = safe_join(root, relative)
+        except PathEscape:
+            report.add("PLUGIN_ARTIFACT", relative, "文件路径越出包目录")
+            continue
+        if not target.is_file():
+            report.add("PLUGIN_ARTIFACT", relative, "plugin.files 声明的文件不存在")
 
 
 def _invoke(report: Report, invoke: object, allowed: set[str], rule: str) -> None:

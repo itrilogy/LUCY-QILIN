@@ -182,6 +182,7 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 | `mcp+skill` | 上架 | 先装声明的 MCP，再解压技能 |
 | `runtime` | 不上架 | 商店托管的依赖（二进制、字体包等）。被别的产品引用，不出现在默认搜索里 |
 | `knowledge` | 上架 | 知识包。一组 Markdown 笔记。安装 = 解压到知识目录，不连接、不执行 |
+| `plugin` | 上架 | DSH 插件。Host/Client 可执行代码，按 Tier A/B/C 分级。安装 = 暂存后由用户在 Plugins 确认 |
 
 不在表里的 kind 直接拒绝（`KIND`）。再加一种，先写进这张表，并单独放一个校验模块。不把 `spec_version` 改成 2，已有产品仍是 1。
 
@@ -235,6 +236,7 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 | `reasonix` | `skill_dir`、`mcp_stdio`、`local_bin` |
 | `claude-desktop` | `mcp_stdio`、`mcp_http` |
 | `cursor` | `mcp_stdio`、`mcp_http` |
+| `deepseek-harness` | `skill_dir`、`mcp_stdio`、`mcp_http`、`local_bin`、`plugin` |
 | `generic` | 作者在清单里另外写 `client_caps`，不能靠它绕过校验 |
 
 上传时做能力闭合（`CLIENT_CAPABILITY`）：
@@ -243,6 +245,7 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 - `transport=stdio`：client 必须有 `mcp_stdio`。
 - `transport=streamable-http`：client 必须有 `mcp_http`。
 - 引用了 `runtime` 或外部命令：client 必须有 `local_bin`。
+- `kind=plugin`：client 必须有 `plugin`；v1 只接受 `deepseek-harness`。
 
 这条是改造指南的硬约束：技能若只在 Reasonix 上跑，`clients` 就只写 `reasonix`，不要写成全平台通用。
 
@@ -470,6 +473,30 @@ platform/            可选，且必须覆盖 clients 里的每一个工具
 
 ---
 
+### 4.11 `kind=plugin` 插件
+
+DSH 的 Host/Client 代码。配置式 bundle（只插 MCP 连接、没有代码）仍走 `kind=mcp`，不算插件。
+
+| 字段 | 约定 |
+|---|---|
+| `plugin.tier` | `A`（零 npm 运行时依赖）、`B`（白名单纯 JS 依赖）、`C`（原生模块，当前拒绝） |
+| `plugin.form` | `host` / `client` / `both` |
+| `plugin.entry` | host/both 的 Host 入口，必须出现在 `plugin.files` |
+| `plugin.client` | client/both 的 Client 入口，必须出现在 `plugin.files` |
+| `plugin.patch` | `cordis.patch.yml`，必须存在 |
+| `plugin.files` | 运行文件白名单 |
+| `plugin.dsh` | DSH 版本范围，例如 `>=1.5 <2` |
+| `plugin.capabilities` | 审核对照用，不是权限系统：`tools`、`client-slots`、`commands`、`services`、`network`、`credentials:read`、`credentials:write`、`filesystem:read`、`filesystem:write`、`process:spawn`、`session:read`、`session:write` |
+| `plugin.external` | 需要的外部命令名；写了就要有 `process:spawn` |
+
+包内 `package.json` 的 `version` 必须与清单一致；`scripts` 必须为空；Tier A 不允许 `dependencies` / `optionalDependencies`；Tier B 的 `dependencies` 只能是白名单里的纯 JS 包（当前白名单为空）；`peerDependencies` 只允许 `@deepseek-ai/*`；不允许 `.node` / `binding.gyp`。
+
+`platforms` 只能是 `["any"]`；`clients` 只能是 `["deepseek-harness"]`；`invoke.form` 固定 `install_plugin`。
+
+安装计划：`download` → `check_bin`（每个外部命令）→ `plugin_stage`（解压到 `${PLUGIN_STAGING}/<id>/<version>`，核对 `package.json`，不执行代码）→ `plugin_confirm`（打印路径与安装说明）→ `verify`。商店和参考安装器都不调用 `plugin_manager`；实际安装由用户在 DSH Plugins 里确认。
+
+Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier C 拒绝。`approve` 对 plugin 增加 `SELF_REVIEW`：admin 不能批准自己提交的插件。
+
 ## 5. 商店 MCP
 
 一个 MCP 服务，传输 `streamable-http`。工具按这把 KEY 的角色自动可见：匿名和未授权看不到上传和审核工具；`publisher` 看不到审核工具；`admin` 全部可见。不要把令牌当成工具参数。
@@ -484,7 +511,7 @@ platform/            可选，且必须覆盖 clients 里的每一个工具
 
 | 工具 | 作用 |
 |---|---|
-| `get_spec` | 参数：`name`，取 `upload`、`knowledge`、`skill`、`mcp`、`mcp+skill`、`runtime`。返回该规范全文。未知名字为 `SPEC_UNKNOWN`。打包之前先调。匿名也能调 |
+| `get_spec` | 参数：`name`，取 `upload`、`knowledge`、`skill`、`mcp`、`mcp+skill`、`runtime`、`plugin`。返回该规范全文。未知名字为 `SPEC_UNKNOWN`。打包之前先调。匿名也能调 |
 | `search` | 参数：`query`、`kind`（可选，含 `knowledge`）、`client`（可选）、`platform`（可选）、`limit` / `offset`（可选，分页）。走 `catalog_index`，返回 id、kind、title、summary、author、**最新匹配版本**，以及 `total`、`limit`、`offset`。不把旧版本折掉 |
 | `list_versions` | 参数：`id`、`client`（可选）、`platform`（可选）。返回该产品每个已发布版本的 version、changes、platforms、clients、发布时间 |
 | `resolve` | 参数：`id`、`client`、`platform`、`version`（可选，精确号或范围）。按第 3.1 节返回 `candidates` 和 `selected`。技能包和工具都走这一步 |
@@ -593,7 +620,10 @@ PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果
 | `ensure_bin` | 在本机执行 `detect`。成功才继续。失败则把 `install_guide` 和 `resources` 展示出来并停止，不尝试自动安装 |
 | `ensure_product` | 已弃用。依赖在计划里直接展开成具体步骤，不再发出这个标记；安装器遇到旧计划只打印，不重复安装 |
 | `need_secret` | 向用户要这个变量的值，写入客户端自己的密钥存储。商店不接收这个值 |
-| `verify` | 技能：入口文件存在。MCP：连接并列出工具。两者都有则都做。这一步带 `transport`，以及 `url` 或 `command` / `args`，不带密钥的值 |
+| `verify` | 技能：入口文件存在。MCP：连接并列出工具。插件：暂存目录里的 entry/patch 存在。两者都有则都做。这一步带 `transport`，以及 `url` 或 `command` / `args`，不带密钥的值 |
+| `check_bin` | 插件声明的外部命令是否在 PATH。失败即停，不自动安装 |
+| `plugin_stage` | 插件专用。解压到 `${PLUGIN_STAGING}/<id>/<version>`，核对 `package.json` 的 version 与 entry/client/patch；**不执行代码** |
+| `plugin_confirm` | 打印暂存路径与「在 DSH Plugins 里安装」的说明，返回 0；不调用 `plugin_manager` |
 
 生成顺序：
 
@@ -603,7 +633,8 @@ PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果
 4. 本包若有 MCP：`mcp_add`。
 5. 本包若有技能：`download` + `unpack`。
 6. `secrets`：每项一条 `need_secret`。
-7. 一条 `verify`。MCP 先 `initialize`，再 `tools/list`。连不上、超时，或结果里没有工具列表，这一步失败，后面的步骤不执行。商店服务器不跑这一步，只把它写进安装说明。
+7. 插件：`download` → `check_bin` → `plugin_stage` → `plugin_confirm` → `verify`。商店只做暂存与静态核对。
+8. 一条 `verify`。MCP 先 `initialize`，再 `tools/list`。连不上、超时，或结果里没有工具列表，这一步失败，后面的步骤不执行。商店服务器不跑这一步，只把它写进安装说明。
 
 客户端安装器负责把 `${SKILLS_ROOT}`、`${BIN_DIR}` 和 `mcp_add` 落到自己的真实路径。商店不为每个 AI 工具写一份路径。
 
@@ -808,6 +839,7 @@ MCP 工具是这些操作的薄封装，校验函数只有一份，CLI、HTTP、
 `NOTE_ENTRY` `NOTE_LINK` `NOTE_FRONTMATTER` `NOTE_FILE` `NOTE_SECURITY` `NOTE_ORPHAN` `KNOWLEDGE_SCOPE` `KNOWLEDGE_TAXONOMY` `KNOWLEDGE_MAP`  
 `SECRET_FILE` `SECRET_PATTERN` `CHECKSUM`  
 `DEP_GUIDE_MISSING` `DEP_EXTERNAL_URL` `DEP_EXTERNAL_UNREACHABLE` `DEP_RESOURCE_GAP`  
+`PLUGIN_MANIFEST` `PLUGIN_ENTRY` `PLUGIN_SCRIPT` `PLUGIN_DEPENDENCY` `PLUGIN_CAPABILITY` `PLUGIN_DSH_VERSION` `PLUGIN_ARTIFACT` `PLUGIN_TIER` `SELF_REVIEW`  
 `DEP_STORE_UNPUBLISHED` `DEP_CYCLE` `RUNTIME_ASSET`  
 `VERSION_IMMUTABLE` `ROLE_FORBIDDEN` `IDENTITY_INVALID` `IDENTITY_UNCONFIGURED`  
 `USERNAME_INVALID` `USERNAME_TAKEN` `NAME_INVALID` `KEY_INVALID` `KEY_MISMATCH` `KEY_TAKEN` `PASSWORD_INVALID` `PASSWORD_MISMATCH` `ACCOUNT_DISABLED` `LAST_ADMIN`  

@@ -43,6 +43,9 @@ class CatalogMixin:
         admin = self._require(token, {"admin"})
         row = self._submission(submission_id)
         advance(row["status"], "approve", SUBMISSION, "只有待审核的提交可以发布")
+        manifest = json.loads(row["manifest_json"])
+        if manifest.get("kind") == "plugin" and row["publisher_id"] == admin.id:
+            raise StoreError("SELF_REVIEW", "不能批准自己提交的插件")
         # 提交时校验一次，发布时再校验一次：两个人先后提交同一个新 id 时，
         # 先发布的那位成为 owner，后一条不能借审核动作变成第二件商品。
         namespace = row["package_id"].split(".", 1)[0]
@@ -453,7 +456,7 @@ class CatalogMixin:
             if row is None:
                 raise StoreError("VERSION_UNAVAILABLE", "没有这个已发布版本")
             manifest = json.loads(row["manifest_json"])
-            if manifest.get("kind") in {"skill", "mcp+skill", "knowledge"}:
+            if manifest.get("kind") in {"skill", "mcp+skill", "knowledge", "plugin"}:
                 return _read_artifact(row["artifact_path"]), row["artifact_sha256"]
             if manifest.get("kind") != "runtime":
                 raise StoreError("VERSION_UNAVAILABLE", "这个产品没有可下载的制品")
