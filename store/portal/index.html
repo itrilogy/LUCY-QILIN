@@ -237,12 +237,12 @@
           </div>
           <div class="group hidden" id="connect-secret">
             <h2>这一把 KEY</h2>
-            <p class="foot">只出现这一次。离开之后明文不再显示。发布配置里的 KEY 由你自己填入；只读配置不需要它。</p>
+            <p class="foot">只出现这一次。发布标签会直接带上这把 KEY；只读配置不需要它。离开页面后明文不再显示，需要时用下面的「重新生成」。</p>
             <pre id="connect-key" class="diff"></pre>
           </div>
           <div class="group hidden" id="connect-later">
             <h2>已经生成</h2>
-            <p class="foot" id="connect-later-note">这把 KEY 已经生成。明文只在创建或重新生成时出现一次。重新生成会作废原来的那一把，仍然只有一把。交目录前先调用 get_spec。钥匙放进环境变量 QILIN_STORE_KEY，不要写进命令，也不要写进笔记。</p>
+            <p class="foot" id="connect-later-note">这把 KEY 已经生成。明文只在创建或重新生成时出现一次；重新生成会作废原来的那一把。内网使用时，发布标签会直接带 KEY，不需要再设环境变量。</p>
             <p class="sku" id="connect-url"></p>
             <div class="row"><button type="button" class="btn" id="reissue-key">重新生成</button></div>
             <p class="state" id="connect-state"></p>

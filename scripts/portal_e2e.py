@@ -140,9 +140,28 @@ def main() -> int:
             page.click("#login-submit")
             page.locator("#who").filter(has_text="审核").wait_for()
             page.click('.nav button[data-view="connect"]')
+            assert page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]').is_disabled()
+            page.click("#reissue-key")
+            page.wait_for_timeout(400)
+            key = page.locator("#connect-key").inner_text().strip()
+            assert key, "重新生成后没有显示 KEY 明文"
             page.click('#connect-tab-buttons button[data-tab="dsh-publish"]')
-            assert "qilin-publish" in page.locator("#connect-tab-body").inner_text()
-            assert "QILIN_STORE_KEY" in page.locator("#connect-tab-body").inner_text()
+            body = page.locator("#connect-tab-body").inner_text()
+            assert "qilin-publish" in body
+            assert "Authorization: Bearer" in body
+            assert key in body
+            REVIEWER["key"] = key
+            (ROOT / "var/accounts/reviewer.json").write_text(
+                json.dumps(REVIEWER, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+            )
+            # 重新生成可能清掉旧会话；如果页面已经回到未登录，就重新登录。
+            page.wait_for_timeout(600)
+            if page.locator("#login-open").is_visible():
+                page.click("#login-open")
+                page.fill("#login-username", REVIEWER["username"])
+                page.fill("#login-password", REVIEWER["password"])
+                page.click("#login-submit")
+            page.locator("#who").filter(has_text="审核").wait_for()
             page.click('.nav button[data-view="shelf"]')
             page.click("#new-product")
             page.select_option("#f-kind", "plugin")

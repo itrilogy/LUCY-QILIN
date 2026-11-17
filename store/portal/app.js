@@ -1603,6 +1603,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
 
     function connectConfig(tab) {
       const url = connectBase();
+      const key = (state.issued && state.issued.key) || "";
       if (tab === "dsh-read") {
         return [
           "- id: mcp-qilin-store",
@@ -1622,49 +1623,50 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           "    serverName: qilin-publish",
           "    transport: streamable-http",
           `    url: ${url}`,
-          "    expandTemplates: true",
           "    headers:",
-          "      Authorization: !!js '`Bearer ${process.env.QILIN_STORE_KEY}`'",
+          `      Authorization: Bearer ${key}`,
           "    failOnStartupError: false",
         ].join("\n");
       }
       const publish = tab === "generic-publish";
       const name = publish ? "qilin-publish" : "qilin-store";
       const server = { type: "http", url };
-      if (publish) server.headers = { Authorization: "Bearer <你的 KEY>" };
+      if (publish) server.headers = { Authorization: `Bearer ${key}` };
       return JSON.stringify({ mcpServers: { [name]: server } }, null, 2);
     }
 
-    function renderConnectTabs(signed) {
+    function renderConnectTabs() {
+      const canPublish = Boolean(state.issued && state.issued.key);
       const notes = {
         "dsh-read": "DSH 只读：不需要 KEY。serverName=qilin-store。",
-        "dsh-publish": "DSH 发布：需要 KEY。serverName=qilin-publish；先把 KEY 放进 QILIN_STORE_KEY。",
+        "dsh-publish": "DSH 发布：KEY 明文已写入配置。serverName=qilin-publish。",
         "generic-read": "通用只读：不需要 KEY。name=qilin-store。",
-        "generic-publish": "通用发布：需要 KEY。name=qilin-publish；把 <你的 KEY> 换成这一页显示的 KEY。",
+        "generic-publish": "通用发布：KEY 明文已写入配置。name=qilin-publish。",
       };
-      if (!signed && state.connectTab.endsWith("publish")) state.connectTab = "dsh-read";
+      if (!canPublish && state.connectTab.endsWith("publish")) state.connectTab = "dsh-read";
       document.querySelectorAll("#connect-tab-buttons button[data-tab]").forEach((button) => {
         const publish = button.dataset.tab.endsWith("publish");
-        button.disabled = publish && !signed;
+        button.disabled = publish && !canPublish;
         button.setAttribute("aria-selected", button.dataset.tab === state.connectTab ? "true" : "false");
       });
       document.getElementById("connect-tab-body").textContent = connectConfig(state.connectTab);
-      document.getElementById("connect-tab-note").textContent =
-        (notes[state.connectTab] || "") + " 同一客户端只装一个；发布配置已包含只读工具。";
+      const note = notes[state.connectTab] || "";
+      document.getElementById("connect-tab-note").textContent = canPublish || !state.connectTab.endsWith("publish")
+        ? note + " 同一客户端只装一个；发布配置已包含只读工具。"
+        : note + " 当前没有 KEY 明文：请登录后点「重新生成」，发布配置会直接带 KEY。";
     }
 
     function renderConnect() {
       const signed = signedIn();
-      document.getElementById("connect-anon").classList.toggle("hidden", signed);
+      const issued = Boolean(state.issued && state.issued.key);
+      document.getElementById("connect-anon").classList.toggle("hidden", signed || issued);
       const secret = document.getElementById("connect-secret");
       const later = document.getElementById("connect-later");
-      secret.classList.toggle("hidden", !signed || !(state.issued && state.issued.key));
-      if (signed && state.issued && state.issued.key) {
-        document.getElementById("connect-key").textContent = state.issued.key;
-      }
-      later.classList.toggle("hidden", !signed || Boolean(state.issued && state.issued.key));
+      secret.classList.toggle("hidden", !issued);
+      if (issued) document.getElementById("connect-key").textContent = state.issued.key;
+      later.classList.toggle("hidden", !signed && !issued);
       if (signed) document.getElementById("connect-url").textContent = state.mcpUrl || "";
-      renderConnectTabs(signed);
+      renderConnectTabs();
     }
 
     function clearReset() {

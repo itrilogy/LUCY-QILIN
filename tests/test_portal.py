@@ -97,7 +97,7 @@ class PortalApiTests(unittest.TestCase):
         self.assertIn("从实验室账号进来的", app_js)
         self.assertIn("在 DSH 的 Plugins 里安装", app_js)
         self.assertIn("插件目录根上要有 package.json", app_js)
-        self.assertIn("QILIN_STORE_KEY", app_js)
+        self.assertIn("Authorization: Bearer", app_js)
         self.assertIn("qilin-store", app_js)
         self.assertIn("qilin-publish", app_js)
         self.assertIn("插件审核清单", app_js)
