@@ -340,6 +340,12 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     result = store.revise(token, path.split("/")[3], body["manifest"], _files(body))
                     self._send(200, _result(result))
                     return
+                if path.startswith("/v1/submissions/") and path.endswith("/plugin-review"):
+                    review = store.review_plugin(
+                        token, path.split("/")[3], body.get("checklist") or {},
+                    )
+                    self._send(200, review)
+                    return
                 if path.startswith("/v1/submissions/") and path.endswith("/approve"):
                     store.approve(token, path.split("/")[3])
                     self._send(200, {"status": "published"})

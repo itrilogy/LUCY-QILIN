@@ -101,6 +101,13 @@ class StoreBase:
               unpublish_reason TEXT,
               PRIMARY KEY (package_id, version)
             );
+            CREATE TABLE IF NOT EXISTS plugin_reviews (
+              submission_id TEXT PRIMARY KEY,
+              reviewer_id TEXT NOT NULL,
+              checklist_json TEXT NOT NULL,
+              code_sha256 TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS revisions (
               submission_id TEXT PRIMARY KEY,
               manifest_json TEXT NOT NULL,

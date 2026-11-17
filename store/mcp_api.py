@@ -20,7 +20,7 @@ PUBLISHER = (
     "get_submission",
     "withdraw",
 )
-ADMIN = ("list_reviews", "get_review", "approve", "reject", "unpublish", "transfer_namespace", "list_audit")
+ADMIN = ("list_reviews", "get_review", "review_plugin", "approve", "reject", "unpublish", "transfer_namespace", "list_audit")
 
 _SCHEMAS: dict[str, dict] = {
     "get_spec": {
@@ -148,6 +148,14 @@ _SCHEMAS: dict[str, dict] = {
         "description": "一条待审核提交的清单、校验结果和压缩包里的文件名。不是整个压缩包，这里也不能改字段。",
         "properties": {"submission_id": {"type": "string"}},
         "required": ["submission_id"],
+    },
+    "review_plugin": {
+        "description": "记录插件审核清单。只有 admin 能调，不能审自己提交的插件。checklist 必须逐项为 true；记录后 approve 才放行。",
+        "properties": {
+            "submission_id": {"type": "string"},
+            "checklist": {"type": "object", "description": "逐项为 true 的审核清单。"},
+        },
+        "required": ["submission_id", "checklist"],
     },
     "approve": {
         "description": "发布这条提交。new_version 成为新的已发布版本；add_platform 只给该版本加上这个平台，已有平台的文件不变。不改清单正文。",
@@ -388,6 +396,10 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
         return {"items": store.list_reviews(token)}
     if name == "get_review":
         return store.get_review(token, arguments["submission_id"])
+    if name == "review_plugin":
+        return store.review_plugin(
+            token, arguments["submission_id"], arguments.get("checklist") or {},
+        )
     if name == "approve":
         store.approve(token, arguments["submission_id"])
         return {"status": "published"}

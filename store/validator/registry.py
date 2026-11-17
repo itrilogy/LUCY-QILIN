@@ -36,3 +36,15 @@ PLUGIN_CAPABILITIES = {
     "filesystem:read", "filesystem:write", "process:spawn",
     "session:read", "session:write",
 }
+
+# 插件审核清单。approve 前必须由 admin 逐项确认；只做人工核对，不做自动扫描。
+PLUGIN_REVIEW_ITEMS = (
+    "source_readable",
+    "no_install_scripts",
+    "dependencies_reviewed",
+    "capabilities_checked",
+    "external_commands_checked",
+    "lifecycle_cleanup",
+    "no_secrets",
+    "dsh_range_checked",
+)

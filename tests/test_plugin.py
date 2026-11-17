@@ -12,6 +12,7 @@ from pathlib import Path
 from store.errors import StoreError
 from store.installer import run as run_installer
 from store.service import Store
+from store.validator.registry import PLUGIN_REVIEW_ITEMS
 from store.validator.validate import validate_manifest, validate_path
 
 
@@ -158,8 +159,14 @@ class PluginServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "pending", result.rules)
         return result
 
+    def _review(self, reviewer, submission_id):
+        return self.store.review_plugin(
+            reviewer, submission_id, {item: True for item in PLUGIN_REVIEW_ITEMS},
+        )
+
     def test_tier_a_publisher_can_submit_and_admin_publishes(self) -> None:
         result = self._submit()
+        self._review(self.admin, result.submission_id)
         self.store.approve(self.admin, result.submission_id)
         releases = self.store.list_versions("lab.hello-plugin")
         self.assertEqual(releases[0]["version"], "1.0.0")
@@ -180,10 +187,45 @@ class PluginServiceTests(unittest.TestCase):
         with self.assertRaises(StoreError) as caught:
             self.store.approve(self.admin, result.submission_id)
         self.assertEqual(caught.exception.rule, "SELF_REVIEW")
+        with self.assertRaises(StoreError) as caught:
+            self._review(self.admin, result.submission_id)
+        self.assertEqual(caught.exception.rule, "SELF_REVIEW")
+        self._review(self.other_admin, result.submission_id)
         self.store.approve(self.other_admin, result.submission_id)
+
+    def test_plugin_cannot_be_published_without_review(self) -> None:
+        result = self._submit()
+        with self.assertRaises(StoreError) as caught:
+            self.store.approve(self.admin, result.submission_id)
+        self.assertEqual(caught.exception.rule, "PLUGIN_REVIEW_REQUIRED")
+
+    def test_incomplete_checklist_is_refused(self) -> None:
+        result = self._submit()
+        with self.assertRaises(StoreError) as caught:
+            self.store.review_plugin(self.admin, result.submission_id, {"source_readable": True})
+        self.assertEqual(caught.exception.rule, "PLUGIN_REVIEW_REQUIRED")
+
+    def test_review_requires_admin(self) -> None:
+        result = self._submit()
+        with self.assertRaises(StoreError) as caught:
+            self._review(self.publisher, result.submission_id)
+        self.assertEqual(caught.exception.rule, "ROLE_FORBIDDEN")
+
+    def test_revision_clears_the_old_review(self) -> None:
+        result = self._submit()
+        self._review(self.admin, result.submission_id)
+        revised = self.store.revise(
+            self.publisher, result.submission_id, plugin_manifest(changes="修订后需要重新审核。"),
+            plugin_files(),
+        )
+        self.assertEqual(revised.status, "pending")
+        with self.assertRaises(StoreError) as caught:
+            self.store.approve(self.admin, result.submission_id)
+        self.assertEqual(caught.exception.rule, "PLUGIN_REVIEW_REQUIRED")
 
     def test_install_plan_uses_plugin_staging(self) -> None:
         result = self._submit()
+        self._review(self.admin, result.submission_id)
         self.store.approve(self.admin, result.submission_id)
         plan = self.store.make_install_plan(
             "lab.hello-plugin", "1.0.0",

@@ -362,6 +362,7 @@ class SubmissionMixin:
             self._db.execute(
                 "DELETE FROM submission_assets WHERE submission_id = ?", (submission_id,)
             )
+            self._db.execute("DELETE FROM plugin_reviews WHERE submission_id = ?", (submission_id,))
             self._db.execute(
                 """
                 UPDATE submissions

@@ -11,6 +11,7 @@ from store.errors import StoreError
 from store.plan import PlanError, install_plan, resolve
 from store.semver import cmp as _cmp
 from store.states import RELEASE, SUBMISSION, advance
+from store.validator.registry import PLUGIN_REVIEW_ITEMS
 from store.views import (
     _check_add_platform,
     _compute_file_diffs,
@@ -36,6 +37,41 @@ def _like(text: str) -> str:
 
 
 class CatalogMixin:
+    def review_plugin(self, token: str, submission_id: str, checklist: dict) -> dict:
+        with self._lock:
+            return self._review_plugin(token, submission_id, checklist)
+    def _review_plugin(self, token: str, submission_id: str, checklist: dict) -> dict:
+        admin = self._require(token, {"admin"})
+        row = self._submission(submission_id)
+        if row["status"] != "pending":
+            raise StoreError("VERSION_UNAVAILABLE", "只能审核待审核的插件")
+        manifest = json.loads(row["manifest_json"])
+        if manifest.get("kind") != "plugin":
+            raise StoreError("PLUGIN_REVIEW_REQUIRED", "只有插件需要审核清单")
+        if row["publisher_id"] == admin.id:
+            raise StoreError("SELF_REVIEW", "不能审核自己提交的插件")
+        if not isinstance(checklist, dict):
+            raise StoreError("PLUGIN_REVIEW_REQUIRED", "checklist 必须是对象")
+        missing = [item for item in PLUGIN_REVIEW_ITEMS if checklist.get(item) is not True]
+        if missing:
+            raise StoreError("PLUGIN_REVIEW_REQUIRED", "审核清单还有未确认项：" + "、".join(missing))
+        payload = {item: True for item in PLUGIN_REVIEW_ITEMS}
+        self._db.execute(
+            """
+            INSERT INTO plugin_reviews (submission_id, reviewer_id, checklist_json, code_sha256)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(submission_id) DO UPDATE SET
+              reviewer_id = excluded.reviewer_id,
+              checklist_json = excluded.checklist_json,
+              code_sha256 = excluded.code_sha256,
+              created_at = CURRENT_TIMESTAMP
+            """,
+            (submission_id, admin.id, json.dumps(payload, ensure_ascii=False), row["artifact_sha256"] or ""),
+        )
+        self._db.commit()
+        self._audit(admin.id, "review_plugin", row["package_id"], row["version"])
+        return {"submission_id": submission_id, "reviewer_id": admin.id, "checklist": payload, "code_sha256": row["artifact_sha256"] or ""}
+
     def approve(self, token: str, submission_id: str) -> None:
         with self._lock:
             self._approve(token, submission_id)
@@ -46,6 +82,12 @@ class CatalogMixin:
         manifest = json.loads(row["manifest_json"])
         if manifest.get("kind") == "plugin" and row["publisher_id"] == admin.id:
             raise StoreError("SELF_REVIEW", "不能批准自己提交的插件")
+        if manifest.get("kind") == "plugin":
+            review = self._db.execute(
+                "SELECT 1 FROM plugin_reviews WHERE submission_id = ?", (submission_id,)
+            ).fetchone()
+            if review is None:
+                raise StoreError("PLUGIN_REVIEW_REQUIRED", "发布插件前必须先记录审核清单")
         # 提交时校验一次，发布时再校验一次：两个人先后提交同一个新 id 时，
         # 先发布的那位成为 owner，后一条不能借审核动作变成第二件商品。
         namespace = row["package_id"].split(".", 1)[0]
@@ -96,6 +138,7 @@ class CatalogMixin:
         row = self._submission(submission_id)
         # 退回只接受待审核的提交。少了这一条，已发布的提交也能被改成 rejected。
         advance(row["status"], "reject", SUBMISSION, "只有待审核的提交可以退回")
+        self._db.execute("DELETE FROM plugin_reviews WHERE submission_id = ?", (submission_id,))
         self._db.execute(
             """
             UPDATE submissions

@@ -495,7 +495,7 @@ DSH 的 Host/Client 代码。配置式 bundle（只插 MCP 连接、没有代码
 
 安装计划：`download` → `check_bin`（每个外部命令）→ `plugin_stage`（解压到 `${PLUGIN_STAGING}/<id>/<version>`，核对 `package.json`，不执行代码）→ `plugin_confirm`（打印路径与安装说明）→ `verify`。商店和参考安装器都不调用 `plugin_manager`；实际安装由用户在 DSH Plugins 里确认。
 
-Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier C 拒绝。`approve` 对 plugin 增加 `SELF_REVIEW`：admin 不能批准自己提交的插件。
+Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier C 拒绝。`approve` 对 plugin 增加 `SELF_REVIEW`：admin 不能批准自己提交的插件。 `approve` 前必须先调 `review_plugin` 记录审核清单；没有记录返回 `PLUGIN_REVIEW_REQUIRED`。清单项见 `PLUGIN_REVIEW_ITEMS`，必须逐项为 true。
 
 ## 5. 商店 MCP
 
@@ -538,6 +538,7 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 |---|---|
 | `list_reviews` | 参数：`status`，默认 `pending` |
 | `get_review` | 清单、校验报告、zip 文件清单（不是整个压缩包内容） |
+| `review_plugin` | 参数：`submission_id`、`checklist`（逐项为 true）。admin 专用；不能审自己提交的插件。记录审核人与制品 sha256；`approve` 插件前必须有这条记录。 |
 | `approve` | `new_version` 变为一个新的已发布版本；`add_platform` 只给该版本加上这个平台。已有平台的文件不变 |
 | `reject` | 参数：`submission_id`、`reason`。作者能在 `list_my_submissions` 里看见原因 |
 | `unpublish` | 已发布版本下架，须填写原因 |
@@ -839,7 +840,7 @@ MCP 工具是这些操作的薄封装，校验函数只有一份，CLI、HTTP、
 `NOTE_ENTRY` `NOTE_LINK` `NOTE_FRONTMATTER` `NOTE_FILE` `NOTE_SECURITY` `NOTE_ORPHAN` `KNOWLEDGE_SCOPE` `KNOWLEDGE_TAXONOMY` `KNOWLEDGE_MAP`  
 `SECRET_FILE` `SECRET_PATTERN` `CHECKSUM`  
 `DEP_GUIDE_MISSING` `DEP_EXTERNAL_URL` `DEP_EXTERNAL_UNREACHABLE` `DEP_RESOURCE_GAP`  
-`PLUGIN_MANIFEST` `PLUGIN_ENTRY` `PLUGIN_SCRIPT` `PLUGIN_DEPENDENCY` `PLUGIN_CAPABILITY` `PLUGIN_DSH_VERSION` `PLUGIN_ARTIFACT` `PLUGIN_TIER` `SELF_REVIEW`  
+`PLUGIN_MANIFEST` `PLUGIN_ENTRY` `PLUGIN_SCRIPT` `PLUGIN_DEPENDENCY` `PLUGIN_CAPABILITY` `PLUGIN_DSH_VERSION` `PLUGIN_ARTIFACT` `PLUGIN_TIER` `PLUGIN_REVIEW_REQUIRED` `SELF_REVIEW`  
 `DEP_STORE_UNPUBLISHED` `DEP_CYCLE` `RUNTIME_ASSET`  
 `VERSION_IMMUTABLE` `ROLE_FORBIDDEN` `IDENTITY_INVALID` `IDENTITY_UNCONFIGURED`  
 `USERNAME_INVALID` `USERNAME_TAKEN` `NAME_INVALID` `KEY_INVALID` `KEY_MISMATCH` `KEY_TAKEN` `PASSWORD_INVALID` `PASSWORD_MISMATCH` `ACCOUNT_DISABLED` `LAST_ADMIN`  
