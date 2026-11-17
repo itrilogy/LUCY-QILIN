@@ -131,6 +131,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         }
         state.mcpUrl = me.mcp_url || "";
         state.profile = me;
+        if (me.store_key) state.issued = { key: me.store_key };
         const authorCard = document.getElementById("author-card");
         if (authorCard) {
           authorCard.textContent = `提交者：${me.nickname || me.name || me.username || ""}（${me.real_name || ""}）/ ${me.department || "未写部门"} / ${me.username || ""}。发布后按账号统计贡献。`;
@@ -1638,6 +1639,10 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         if (state.userId && me.id !== state.userId) {
           throw new Error("这把 KEY 不属于当前登录账号。");
         }
+        await api("/v1/account/remember-key", {
+          method: "POST",
+          body: JSON.stringify({ key }),
+        });
         state.issued = { key };
         input.value = "";
         setState("connect-key-state", "", false);
@@ -1794,7 +1799,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       keyNode.classList.toggle("hidden", !issued);
       if (issued) keyNode.textContent = state.issued.key;
       document.getElementById("connect-key-note").textContent = issued
-        ? "已生成。发布标签直接带这把 KEY；离开页面后明文不再显示。需要换 KEY 时重新生成，旧 KEY 会立即失效。"
+        ? "KEY 已保存。发布标签直接带这把 KEY，重新进入本页也会显示；需要换 KEY 时重新生成，旧 KEY 会立即失效。"
         : "登录只保留会话，不保留 KEY 明文。已保存过 KEY 的，直接粘贴激活；没有保存的，才用「重新生成 KEY」。重新生成会立刻作废旧 KEY。";
       document.getElementById("connect-url").textContent = signed ? (state.mcpUrl || "") : "";
       renderConnectTabs();

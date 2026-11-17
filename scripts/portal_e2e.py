@@ -156,10 +156,8 @@ def main() -> int:
             page.click("#login-submit")
             page.locator("#who").filter(has_text=re.compile("管理员|审核")).wait_for()
             page.click('.nav button[data-view="connect"]')
-            assert page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]').is_disabled()
             assert page.locator("#connect-keypanel").is_visible()
-            page.fill("#connect-existing-key", REVIEWER["key"])
-            page.click("#use-existing-key")
+            assert page.locator("#connect-key").inner_text().strip() == REVIEWER["key"]
             expect(page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]')).to_be_enabled()
             page.click('#connect-tab-buttons button[data-tab="dsh-publish"]')
             body = page.locator("#connect-tab-body").inner_text()

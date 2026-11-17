@@ -170,6 +170,7 @@ class AuthMixin:
             "job_title": row["job_title"] or "",
             "role": row["role"],
             "key_ready": bool(row["key_hash"]),
+            "store_key": row["key_plain"] or "",
         }
     def _open_session(self, account_id: str) -> tuple[dict, str]:
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
@@ -263,12 +264,12 @@ class AuthMixin:
             """
             INSERT INTO accounts (
               id, username, display_name, real_name, nickname, department, job_title,
-              role, password_salt, password_hash, key_salt, key_hash, key_prefix
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              role, password_salt, password_hash, key_salt, key_hash, key_prefix, key_plain
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 account_id, username, nickname, real_name, nickname, department, job_title,
-                role, password_salt, password_hash, salt, hashed, fingerprint,
+                role, password_salt, password_hash, salt, hashed, fingerprint, key,
             ),
         )
         self._db.commit()
@@ -396,8 +397,8 @@ class AuthMixin:
             raise StoreError("ROLE_FORBIDDEN", "只有本人能重新生成自己的 KEY。")
         key, salt, hashed, fingerprint = self._fresh_key(keep=row["id"])
         self._db.execute(
-            "UPDATE accounts SET key_salt = ?, key_hash = ?, key_prefix = ? WHERE id = ?",
-            (salt, hashed, fingerprint, row["id"]),
+            "UPDATE accounts SET key_salt = ?, key_hash = ?, key_prefix = ?, key_plain = ? WHERE id = ?",
+            (salt, hashed, fingerprint, key, row["id"]),
         )
         self._db.execute("DELETE FROM sessions WHERE account_id = ?", (row["id"],))
         self._db.commit()
@@ -405,6 +406,28 @@ class AuthMixin:
         self._audit(row["id"], "issue_key", None, None)
         profile, session = self._open_session(row["id"])
         return profile, session, key
+    def remember_account_key(self, token: str, key: str) -> dict:
+        """把本人已有 KEY 的明文登记到库里，供后续登录直接显示。
+
+        只用于旧库（之前只存哈希）。先用现有哈希校验这把 KEY 属于本人，
+        再写 `key_plain`；不改变 KEY 本身，也不清会话。
+        """
+        with self._lock:
+            principal = self._require(token, {"publisher", "reviewer", "admin"})
+            key = key.strip()
+            if not 4 <= len(key) <= 256:
+                raise StoreError("KEY_INVALID", "KEY 形状不对。")
+            row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (principal.id,)).fetchone()
+            if row is None:
+                raise StoreError("ROLE_FORBIDDEN", "只有本人能登记自己的 KEY。")
+            from store.accounts import key_matches
+            if not key_matches(key, row["key_salt"], row["key_hash"]):
+                raise StoreError("KEY_MISMATCH", "这把 KEY 不属于当前账号。")
+            self._db.execute("UPDATE accounts SET key_plain = ? WHERE id = ?", (key, row["id"]))
+            self._db.commit()
+            self._audit(row["id"], "remember_key", None, None)
+            return self._profile_from_row(self._account_row(row["id"]))
+
     def list_account_names(self) -> list[dict]:
         with self._read():
             rows = self._db.execute(

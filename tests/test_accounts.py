@@ -1,4 +1,4 @@
-"""每人一把商店生成的 KEY。明文只在生成那一次出现。"""
+"""每人一把商店生成的 KEY。内网策略：明文持久化，登录后可见。"""
 
 from __future__ import annotations
 
@@ -47,8 +47,7 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(me["name"], "林深")
         self.assertEqual(me["source"], "account")
         self.assertTrue(me["key_ready"])
-        self.assertNotIn("key", me)
-        self.assertNotIn(admin_key, json.dumps(me))
+        self.assertEqual(me["store_key"], admin_key)
         hidden = self._open("/v1/accounts", expect=403)
         self.assertEqual(hidden["rule"], "ROLE_FORBIDDEN")
         names = self._get("/v1/accounts", admin_cookie)["items"]
@@ -62,11 +61,22 @@ class AccountTests(unittest.TestCase):
         self._post(f"/v1/accounts/{author_row['id']}/role", {"role": "admin"}, cookie=admin_cookie)
         self.assertEqual(self._get("/v1/me", self._login("author.one"))["role"], "admin")
 
+    def test_existing_key_can_be_remembered_for_legacy_accounts(self) -> None:
+        _admin, cookie, key = self._create("admin.one", "沈林", "林深")
+        self.store._db.execute("UPDATE accounts SET key_plain = NULL WHERE username = ?", ("admin.one",))
+        self.store._db.commit()
+        self.assertEqual(self._get("/v1/me", cookie)["store_key"], "")
+        wrong = self._raw("/v1/account/remember-key", {"key": "wrong-key-value"}, cookie=cookie)
+        self.assertIn(wrong[0], {400, 403})
+        remembered = self._raw("/v1/account/remember-key", {"key": key}, cookie=cookie)
+        self.assertEqual(remembered[0], 200, remembered[1])
+        self.assertEqual(self._get("/v1/me", cookie)["store_key"], key)
+
     def test_key_is_the_bearer_and_reissue_replaces_the_only_one(self) -> None:
         _admin, cookie, key = self._create("admin.one", "沈林", "林深")
         me = self._send("/v1/me", bearer=key)
         self.assertEqual(me["role"], "admin")
-        self.assertNotIn(key, json.dumps(me))
+        self.assertEqual(me["store_key"], key)
         listed = self._rpc("tools/list", bearer=key)
         names = [item["name"] for item in listed["result"]["tools"]]
         self.assertIn("approve", names)
@@ -74,11 +84,11 @@ class AccountTests(unittest.TestCase):
         status, replaced, new_cookie = self._raw("/v1/account/key", {}, cookie=cookie)
         self.assertEqual(status, 200, replaced)
         self.assertNotEqual(replaced["key"], key)
-        self.assertNotIn(key, json.dumps(replaced["mcp"]))
+        self.assertIn(replaced["key"], json.dumps(replaced["mcp"]))
         self.assertEqual(self._send("/v1/me", bearer=key)["role"], "anonymous")
         self.assertEqual(self._send("/v1/me", bearer=replaced["key"])["role"], "admin")
         self.assertEqual(self._get("/v1/me", new_cookie)["username"], "admin.one")
-        self.assertNotIn(replaced["key"], json.dumps(self._get("/v1/me", new_cookie)))
+        self.assertEqual(self._get("/v1/me", new_cookie)["store_key"], replaced["key"])
 
     def test_profile_can_change_without_touching_the_key(self) -> None:
         _admin, cookie, key = self._create("admin.one", "沈林", "林深", "数字化")
@@ -201,7 +211,7 @@ class AccountTests(unittest.TestCase):
         key = body["key"]
         self.assertGreaterEqual(len(key), 20)
         self.assertNotIn(password, json.dumps(body))
-        public = {name: value for name, value in body.items() if name not in {"key", "mcp"}}
+        public = {name: value for name, value in body.items() if name not in {"key", "mcp", "store_key"}}
         self.assertNotIn(key, json.dumps(public))
         return body, cookie, key
 

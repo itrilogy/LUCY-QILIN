@@ -165,6 +165,7 @@ class StoreBase:
               key_salt BLOB NOT NULL,
               key_hash BLOB NOT NULL,
               key_prefix TEXT,
+              key_plain TEXT,
               disabled_at TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -213,6 +214,10 @@ class StoreBase:
             # 快速指纹列。旧库没有它，存量账号因此暂时留空，
             # 鉴权时对空值行退回全表比对（见 `_account_from_key`）。
             self._db.execute("ALTER TABLE accounts ADD COLUMN key_prefix TEXT")
+        if "key_plain" not in {row["name"] for row in self._db.execute("PRAGMA table_info(accounts)")}:
+            # 内网部署的明确取舍：保留 KEY 明文，登录后可直接查看/复制发布配置。
+            # 旧库的存量账号留空，需本人重新生成一次后才会持久化。
+            self._db.execute("ALTER TABLE accounts ADD COLUMN key_plain TEXT")
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS accounts_key_prefix ON accounts (key_prefix)"
         )

@@ -313,6 +313,10 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     store.logout_account(token)
                     self._send(200, {"status": "logged_out"}, _session_cookie("", clear=True, secure=_secure(self)))
                     return
+                if path == "/v1/account/remember-key":
+                    store.remember_account_key(token, str(body.get("key") or ""))
+                    self._send(200, {"status": "remembered"})
+                    return
                 if path == "/v1/account/profile":
                     profile = store.update_profile(
                         token,

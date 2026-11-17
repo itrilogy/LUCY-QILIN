@@ -42,7 +42,7 @@
 
 口令由本人在创建账号时设置，用来登录门户。必填是用户名、姓名、昵称、口令、再输入一次口令。部门和岗位可以空着。口令 10 到 64 位，须同时含小写字母、大写字母和数字，首尾不能是空格，不能包含用户名（`PASSWORD_INVALID`）。两次不一致则 `PASSWORD_MISMATCH`。库里只存盐和校验值，响应不回显口令。本人可以改自己的口令，改口令不影响那把 KEY。
 
-KEY 不由本人编，也不由管理员抄给人。创建账号时商店另生成一把随机 KEY，每人同时只有一把，只作为商店 MCP 的 Bearer。明文只在创建、以及本人重新生成的那一次响应里出现。之后的接口不回显。拿 KEY 当口令登录会被拒绝。
+KEY 不由本人编，也不由管理员抄给人。创建账号时商店另生成一把随机 KEY，每人同时只有一把，只作为商店 MCP 的 Bearer。内网部署的明确取舍：`key_plain` 持久化，登录后的 `/v1/me` 和登录响应带 `store_key`，连接页每次进入都能直接显示发布配置。旧库账号没有明文时，本人可粘贴已有 KEY 调 `/v1/account/remember-key` 登记一次；也可重新生成。拿 KEY 当口令登录会被拒绝。
 
 账号资料：用户名、姓名、昵称、部门、岗位。用户名创建后不改。昵称是货架和顶栏上的名字。本人可以改姓名、昵称、部门和岗位，不能改别人的。
 
@@ -687,7 +687,7 @@ PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果
 
 v1 一个进程、一个 SQLite、一个本地制品目录。不要先上数据库集群。
 
-- `accounts`：id、username、display_name（与昵称相同，供旧读法）、real_name、nickname、department、job_title、role（`member` | `publisher` | `reviewer` | `admin`）、password_salt、password_hash、key_salt、key_hash、disabled_at。口令和 KEY 都没有明文。创建和重新生成 KEY 的那一次响应才带 KEY 明文和 MCP 配置
+- `accounts`：id、username、display_name（与昵称相同，供旧读法）、real_name、nickname、department、job_title、role（`member` | `publisher` | `reviewer` | `admin`）、password_salt、password_hash、key_salt、key_hash、key_prefix、key_plain、disabled_at。内网策略下 `key_plain` 保留 KEY 明文；口令仍只存哈希。备份与数据库文件必须按密钥材料保护
 - `sessions`：门户登录会话的哈希和过期时间。会话不是 KEY
 - `principals`：只留给测试夹具。提交上的 `publisher_id` 是账号 id；若用的是枢纽令牌，则是令牌的 `sub`
 - `submissions`：id、package_id、version、submit_kind（`new_version` | `add_platform`）、platforms、kind、status、publisher_id、manifest_json、artifact_path、artifact_sha256、validation_report_json、review_reason、reviewed_by、created_at、reviewed_at
