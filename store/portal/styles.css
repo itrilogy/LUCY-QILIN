@@ -234,3 +234,12 @@
 
 .detail-title { margin-top: 16px; }
 .stack { margin-bottom: 12px; }
+
+.skeleton { min-height: 196px; }
+.skeleton .bar { height: 12px; border-radius: 4px; background: var(--bg-raised); margin: 10px 0; animation: qilin-pulse 1.2s ease-in-out infinite; }
+.skeleton .bar.title { height: 20px; width: 60%; }
+.skeleton .bar.short { width: 40%; }
+@keyframes qilin-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+.skip-link { position: absolute; left: 12px; top: -48px; z-index: 10; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 6px; }
+.skip-link:focus { top: 8px; }

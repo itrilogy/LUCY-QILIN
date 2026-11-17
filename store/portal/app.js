@@ -41,7 +41,25 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     async function api(path, options = {}) {
       const headers = { ...(options.headers || {}) };
       if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
-      const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      if (options.signal) {
+        if (options.signal.aborted) controller.abort();
+        else options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+      let response;
+      try {
+        response = await fetch(path, { ...options, headers, credentials: "same-origin", signal: controller.signal });
+      } catch (caught) {
+        if (caught && caught.name === "AbortError") {
+          const error = new Error("请求超时或被取消。");
+          error.name = "AbortError";
+          throw error;
+        }
+        throw caught;
+      } finally {
+        clearTimeout(timer);
+      }
       const text = await response.text();
       let body = {};
       if (text) {
@@ -213,8 +231,23 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       return article;
     }
 
+    function skeletonCard() {
+      const article = document.createElement("article");
+      article.className = "card goods skeleton";
+      article.append(
+        text("div", "", "bar title"),
+        text("div", "", "bar"),
+        text("div", "", "bar"),
+        text("div", "", "bar short"),
+      );
+      return article;
+    }
+
     async function loadCatalog(which, append = false) {
       const shelf = which === "shelf";
+      catalogAbort?.abort();
+      catalogAbort = new AbortController();
+      const seq = ++catalogSeq;
       const kind = shelf ? state.shelfKind : "runtime";
       const grid = document.getElementById(which + "-grid");
       const stateId = which + "-state";
@@ -222,6 +255,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       const more = document.getElementById("shelf-more");
       if (!append) {
         grid.replaceChildren();
+        grid.append(skeletonCard(), skeletonCard());
         if (shelf) {
           state.shelfOffset = 0;
           state.shelfTotal = 0;
@@ -239,7 +273,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         params.set("offset", String(state.shelfOffset));
       }
       try {
-        const data = await api("/v1/catalog" + (params.toString() ? "?" + params : ""));
+        const data = await api("/v1/catalog" + (params.toString() ? "?" + params : ""), { signal: catalogAbort.signal });
+        if (seq !== catalogSeq) return;
         const items = data.items || [];
         if (shelf) {
           const total = Number.isFinite(data.total) ? data.total : items.length;
@@ -254,6 +289,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           more.classList.toggle("hidden", state.shelfOffset >= total);
         }
         if (!items.length && !append) {
+          grid.replaceChildren();
           if (shelf) {
             setStateAction(stateId, "货架上还没有这类已发布的产品。", "清空筛选", () => {
               document.getElementById("query").value = "";
@@ -267,8 +303,11 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           return;
         }
         if (items.length) setState(stateId, "", false);
+        if (!append) grid.replaceChildren();
         items.forEach((item) => grid.append(card(item, which)));
       } catch (error) {
+        if (error.name === "AbortError" || seq !== catalogSeq) return;
+        grid.replaceChildren();
         setStateAction(stateId, error.message, "重试", () => loadCatalog(which), true);
       }
     }
@@ -570,6 +609,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     let skillExtras = {};
     let noteFiles = null;
     let pluginFiles = null;
+    let catalogSeq = 0;
+    let catalogAbort = null;
     let readingFiles = false;
 
     function openForm(mode, submissionId, manifest) {

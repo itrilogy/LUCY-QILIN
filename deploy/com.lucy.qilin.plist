@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.lucy.qilin</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/qilin/.venv/bin/python</string>
+    <string>-m</string><string>store.cli</string>
+    <string>serve</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8787</string>
+    <string>--db</string><string>/var/lib/qilin/qilin.db</string>
+    <string>--blobs</string><string>/var/lib/qilin/blobs</string>
+  </array>
+  <key>WorkingDirectory</key><string>/opt/qilin</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key><string>/opt/qilin</string>
+    <key>QILIN_PUBLIC_BASE</key><string>https://qilin.example.com</string>
+    <key>QILIN_ACCESS_LOG</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/var/log/qilin/store.log</string>
+  <key>StandardErrorPath</key><string>/var/log/qilin/store.err.log</string>
+</dict>
+</plist>

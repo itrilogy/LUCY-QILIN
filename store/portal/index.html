@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/portal/styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
   <div class="app">
     <header class="top">
       <div class="marks">
@@ -36,7 +37,7 @@
         <button type="button" data-view="admin-users">用户管理</button>
         <button type="button" data-view="connect">连接</button>
       </nav>
-      <main class="main">
+      <main class="main" id="main">
         <section id="shelf" class="view on" data-kind="">
           <div class="row">
             <h1>货架</h1>
@@ -63,7 +64,7 @@
             </div>
             <span class="count" id="shelf-count"></span>
           </div>
-          <p class="state" id="shelf-state">正在读取货架。</p>
+          <p class="state" id="shelf-state" role="status">正在读取货架。</p>
           <div class="grid" id="shelf-grid"></div>
           <div class="row"><button type="button" class="btn hidden" id="shelf-more">加载更多</button></div>
         </section>

@@ -6,7 +6,11 @@ import base64
 import binascii
 import hmac
 import json
+import os
 import secrets
+import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -23,6 +27,32 @@ _MAX_BODY = (_MAX_BYTES // 3 + 1) * 4 + 1024 * 1024
 
 # 门户与静态资源随包分发，`pip install` 之后也能打开首页。
 # 不再引用仓库外的 `LUCY-DESIGN`：换台机器克隆就掉样式的问题由此消除。
+class _RateLimiter:
+    """单进程滑动窗口限流。多进程/反代后要配 fail2ban 或在网关再做一层。"""
+
+    def __init__(self, limit: int, window: float) -> None:
+        self.limit = max(1, int(limit))
+        self.window = float(window)
+        self._events: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, now: float | None = None) -> bool:
+        moment = time.monotonic() if now is None else now
+        with self._lock:
+            cutoff = moment - self.window
+            events = [item for item in self._events.get(key, []) if item > cutoff]
+            if len(events) >= self.limit:
+                self._events[key] = events
+                return False
+            events.append(moment)
+            self._events[key] = events
+            return True
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._events.pop(key, None)
+
+
 PORTAL_DIR = Path(__file__).resolve().parent / "portal"
 PORTAL = PORTAL_DIR / "index.html"
 DESIGN_FILES = {
@@ -55,6 +85,15 @@ Headers = list[tuple[str, str]]
 
 def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(30)
+
+        def _limit(self, bucket: str) -> None:
+            limiter = self.server.limiters[bucket]
+            if not limiter.allow(self.client_address[0]):
+                raise StoreError("RATE_LIMITED", "请求过于频繁，请稍后再试。")
+
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
@@ -116,8 +155,18 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     self._empty(405, [("Allow", "POST")])
                     return
                 if path == "/api/health":
-                    status = store.identity_status()
-                    self._send(200, {"status": "ok", "app_id": status["app_id"], "identity": status["mode"]})
+                    identity = store.identity_status()
+                    health = store.health()
+                    self._send(
+                        200 if health["status"] == "ok" else 503,
+                        {
+                            "status": health["status"],
+                            "app_id": identity["app_id"],
+                            "identity": identity["mode"],
+                            "database": health["database"],
+                            "blobs": health["blobs"],
+                        },
+                    )
                     return
                 if path == "/v1/identity":
                     info = store.identity_status()
@@ -227,6 +276,7 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                 if not isinstance(body, dict):
                     raise StoreError("SPEC_VERSION", "请求体必须是 JSON 对象")
                 if path == "/v1/account":
+                    self._limit("register")
                     if str(body.get("key") or "").strip():
                         raise StoreError("KEY_INVALID", "KEY 由商店生成，不能自己设置。")
                     password = str(body.get("password") or "")
@@ -244,10 +294,12 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     self._send(200, _issued(profile, key, _base(self)), _session_cookie(session, secure=_secure(self)))
                     return
                 if path == "/v1/login":
+                    self._limit("login")
                     profile, session = store.login_account(
                         str(body.get("username") or ""),
                         str(body.get("password") or ""),
                     )
+                    self.server.limiters["login"].reset(self.client_address[0])
                     self._send(200, profile, _session_cookie(session, secure=_secure(self)))
                     return
                 if path == "/v1/logout":
@@ -418,13 +470,20 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self._send(http_status(exc.rule), {"rule": exc.rule, "message": exc.message})
 
         def log_message(self, fmt: str, *args: object) -> None:
-            return
+            if os.environ.get("QILIN_ACCESS_LOG") == "1":
+                sys.stderr.write(
+                    "%s - - [%s] %s\n"
+                    % (self.client_address[0], self.log_date_time_string(), fmt % args)
+                )
 
         def _send(self, status: int, payload: dict, extra: Headers | None = None) -> None:
             raw = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cache-Control", "no-store")
             for name, value in _pairs(extra):
                 self.send_header(name, value)
             self.end_headers()
@@ -466,6 +525,7 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("X-Checksum-Sha256", digest)
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(payload)
 
@@ -488,6 +548,7 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
             if path.suffix == ".html":
                 self.send_header("Content-Security-Policy", CSP)
             self.end_headers()
@@ -496,12 +557,22 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 128
+
+
 def serve(
     store: Store,
     host: str = "127.0.0.1",
     port: int = 0,
     public_base: str = "",
     hub_authorize: str = "",
+    login_limit: int = 20,
+    login_window: float = 300,
+    register_limit: int = 10,
+    register_window: float = 3600,
 ) -> ThreadingHTTPServer:
     """启动服务。`public_base` 用于反代部署时固定对外地址。
 
@@ -513,9 +584,13 @@ def serve(
     也能与商店下发的 Cookie 对上。不给则跳转登录仍只由枢纽发起，
     `state` 无从核对——这条差别在日志里以 `STATE_UNBOUND` 记下。
     """
-    server = ThreadingHTTPServer((host, port), make_handler(store))
+    server = _Server((host, port), make_handler(store))
     server.public_base = public_base.strip()  # type: ignore[attr-defined]
     server.hub_authorize = hub_authorize.strip()  # type: ignore[attr-defined]
+    server.limiters = {  # type: ignore[attr-defined]
+        "login": _RateLimiter(login_limit, login_window),
+        "register": _RateLimiter(register_limit, register_window),
+    }
     return server
 
 

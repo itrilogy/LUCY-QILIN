@@ -62,6 +62,8 @@ class PortalApiTests(unittest.TestCase):
         self.assertIn('id="audit-export"', page)
         self.assertIn('id="sort"', page)
         self.assertIn('id="shelf-more"', page)
+        self.assertIn('class="skip-link"', page)
+        self.assertIn('id="main"', page)
         self.assertIn("加载更多", page)
         self.assertIn("选择技能目录", page)
         self.assertIn("QILIN_STORE_KEY", page)

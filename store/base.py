@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -222,6 +223,21 @@ class StoreBase:
             "UPDATE accounts SET nickname = display_name WHERE nickname = '' AND display_name != ''"
         )
         self._db.commit()
+    def health(self) -> dict:
+        """就绪检查：数据库可读、制品目录可写。不返回路径与错误原文。"""
+        try:
+            with self._read():
+                self._db.execute("SELECT 1").fetchone()
+            database = "ok"
+        except Exception:  # noqa: BLE001 - 健康检查不能把内部异常抛给探针
+            database = "unavailable"
+        blobs = "ok" if self.blob_dir.is_dir() and os.access(self.blob_dir, os.W_OK) else "unavailable"
+        return {
+            "status": "ok" if database == "ok" and blobs == "ok" else "degraded",
+            "database": database,
+            "blobs": blobs,
+        }
+
     def _enable_fts(self) -> bool:
         """建 FTS5 trigram 表。SQLite 没编 FTS5 时返回 False，搜索回退 LIKE。"""
         try:

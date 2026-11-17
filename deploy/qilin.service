@@ -1,0 +1,28 @@
+[Unit]
+Description=Qilin AI marketplace (portal + HTTP + MCP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qilin
+Group=qilin
+WorkingDirectory=/opt/qilin
+Environment=PYTHONPATH=/opt/qilin
+Environment=QILIN_PUBLIC_BASE=https://qilin.example.com
+Environment=QILIN_ACCESS_LOG=1
+EnvironmentFile=-/etc/qilin/qilin.env
+ExecStart=/opt/qilin/.venv/bin/python -m store.cli serve --host 127.0.0.1 --port 8787 --db /var/lib/qilin/qilin.db --blobs /var/lib/qilin/blobs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=qilin
+ReadWritePaths=/var/lib/qilin
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

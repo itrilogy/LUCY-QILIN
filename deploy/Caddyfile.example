@@ -1,0 +1,8 @@
+# 把 qilin.example.com 换成真实域名；Caddy 自动签发 TLS。
+qilin.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8787 {
+        # MCP 的流式响应不要被缓冲。
+        flush_interval -1
+    }
+}
