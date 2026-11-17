@@ -78,6 +78,27 @@ class CatalogIndexTests(unittest.TestCase):
         self.assertEqual(self.store.search_page("", kind="skill")["total"], 1)
         self.assertEqual(self.store.search_page("", kind="knowledge")["total"], 0)
 
+    def test_reopen_preserves_published_at_order_and_archives_release(self) -> None:
+        self._publish("1.0.0", "luxi.older")
+        self._publish("1.0.0", "luxi.newer")
+        self.store._db.execute(
+            "UPDATE releases SET published_at = '2026-01-01 00:00:00' WHERE package_id = 'luxi.older'"
+        )
+        self.store._db.execute(
+            "UPDATE releases SET published_at = '2026-02-01 00:00:00' WHERE package_id = 'luxi.newer'"
+        )
+        rel = self.store._db.execute(
+            "SELECT artifact_path FROM releases WHERE package_id = 'luxi.newer'"
+        ).fetchone()
+        self.assertIn("releases", Path(rel["artifact_path"]).parts)
+        self.assertTrue(Path(rel["artifact_path"]).is_file())
+        self.store._db.commit()
+        self.store.close()
+        reopened = Store(self.db, self.blobs)
+        self.addCleanup(reopened.close)
+        items = reopened.search_page("", sort="updated")["items"]
+        self.assertEqual([item["id"] for item in items], ["luxi.newer", "luxi.older"])
+
 
 if __name__ == "__main__":
     unittest.main()

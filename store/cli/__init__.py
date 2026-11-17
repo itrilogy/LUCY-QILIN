@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     server.add_argument("--log-level", default="", help="日志级别，默认 WARNING。也可用 QILIN_LOG_LEVEL")
+    server.add_argument(
+        "--trust-proxy", action="store_true",
+        help="反向代理部署时读取 X-Real-IP / X-Forwarded-For 做限流键；也可设 QILIN_TRUST_PROXY=1",
+    )
     args = parser.parse_args(argv)
     if args.command == "validate":
         return _validate(args)
@@ -100,6 +104,7 @@ def _serve(args: argparse.Namespace) -> int:
         store, args.host, args.port,
         public_base=_public_base(args),
         hub_authorize=_hub_authorize(args),
+        trust_proxy=bool(args.trust_proxy or os.environ.get("QILIN_TRUST_PROXY") == "1"),
     )
     print(f"http://{args.host}:{server.server_port}", file=sys.stderr)
     print(f"日志级别 {level}。", file=sys.stderr)

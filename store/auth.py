@@ -8,6 +8,7 @@ import time
 
 from store.base import _hash
 from store.errors import Principal, StoreError
+from store.roles import ADMIN_ROLES, PUBLISHER_ROLES
 from store.identity import APP_ID, IdentityError, _name, _role
 
 
@@ -27,7 +28,7 @@ class AuthMixin:
         with self._lock:
             return self._create_principal(name, role)
     def _create_principal(self, name: str, role: str) -> tuple[Principal, str]:
-        if role not in {"publisher", "reviewer", "admin"}:
+        if role not in PUBLISHER_ROLES:
             raise StoreError("ROLE_FORBIDDEN", "角色只能是 publisher、reviewer 或 admin")
         token = secrets.token_urlsafe(32)
         principal = Principal(secrets.token_hex(8), name, role)
@@ -327,7 +328,7 @@ class AuthMixin:
     def _change_password(self, token: str, old_password: str, new_password: str) -> dict:
         from store.accounts import key_matches, make_key, password_of
 
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有本人能修改自己的口令。")
@@ -368,7 +369,7 @@ class AuthMixin:
     ) -> dict:
         from store.accounts import optional_text, person_name
 
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有栖林用户能改自己的资料。")
@@ -391,7 +392,7 @@ class AuthMixin:
         with self._lock:
             return self._issue_account_key(token)
     def _issue_account_key(self, token: str) -> tuple[dict, str, str]:
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._db.execute("SELECT id FROM accounts WHERE id = ?", (principal.id,)).fetchone()
         if row is None:
             raise StoreError("ROLE_FORBIDDEN", "只有本人能重新生成自己的 KEY。")
@@ -420,7 +421,7 @@ class AuthMixin:
             ]
     def list_accounts(self, token: str) -> list[dict]:
         with self._read():
-            self._require(token, {"admin"})
+            self._require(token, ADMIN_ROLES)
             rows = self._db.execute(
                 """
                 SELECT id, username, display_name, real_name, nickname, department, job_title,
@@ -444,8 +445,8 @@ class AuthMixin:
             ]
     def set_account_role(self, token: str, account_id: str, role: str) -> None:
         with self._lock:
-            admin = self._require(token, {"admin"})
-            if role not in {"publisher", "reviewer", "admin"}:
+            admin = self._require(token, ADMIN_ROLES)
+            if role not in PUBLISHER_ROLES:
                 raise StoreError("ROLE_FORBIDDEN", "角色只能是作者、审核或管理员。")
             row = self._account_row(account_id)
             if row["role"] == "admin" and role != "admin":
@@ -458,7 +459,7 @@ class AuthMixin:
             self._audit(admin.id, "set_role", None, None)
     def disable_account(self, token: str, account_id: str) -> None:
         with self._lock:
-            admin = self._require(token, {"admin"})
+            admin = self._require(token, ADMIN_ROLES)
             row = self._account_row(account_id)
             if row["id"] == admin.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能停用自己。")
@@ -477,7 +478,7 @@ class AuthMixin:
     def _reset_account_password(self, token: str, account_id: str) -> dict:
         from store.accounts import issue_password, make_key, password_of
 
-        admin = self._require(token, {"admin"})
+        admin = self._require(token, ADMIN_ROLES)
         row = self._account_row(account_id)
         if row["id"] == admin.id:
             raise StoreError("ROLE_FORBIDDEN", "不能重置自己的口令。请在资料页修改。")

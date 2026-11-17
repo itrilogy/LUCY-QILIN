@@ -40,6 +40,12 @@ class RoleTests(unittest.TestCase):
         self.assertTrue(self.store.list_audit(self.reviewer)["items"])
         self.assertEqual(self.store.contributions(self.reviewer)["total"], 1)
 
+    def test_reviewer_can_unpublish(self) -> None:
+        result = self._submit(self.publisher)
+        self.store.approve(self.reviewer, result.submission_id)
+        self.store.unpublish(self.reviewer, "lab.role", "3.2.0", "审核下架")
+        self.assertEqual(self.store.search_page("lab.role")["total"], 0)
+
     def test_publisher_cannot_review(self) -> None:
         result = self._submit(self.publisher)
         with self.assertRaises(StoreError) as caught:

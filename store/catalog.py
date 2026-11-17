@@ -5,11 +5,14 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
+import shutil
 import sqlite3
 from pathlib import Path
 from functools import cmp_to_key
 
 from store.errors import StoreError
+from store.roles import REVIEW_ROLES
 from store.plan import PlanError, install_plan, resolve
 from store.semver import cmp as _cmp
 from store.states import RELEASE, SUBMISSION, advance
@@ -43,7 +46,7 @@ class CatalogMixin:
         with self._lock:
             return self._review_plugin(token, submission_id, checklist)
     def _review_plugin(self, token: str, submission_id: str, checklist: dict) -> dict:
-        admin = self._require(token, {"reviewer", "admin"})
+        admin = self._require(token, REVIEW_ROLES)
         row = self._submission(submission_id)
         if row["status"] != "pending":
             raise StoreError("VERSION_UNAVAILABLE", "只能审核待审核的插件")
@@ -78,7 +81,7 @@ class CatalogMixin:
         with self._lock:
             self._approve(token, submission_id)
     def _approve(self, token: str, submission_id: str) -> None:
-        admin = self._require(token, {"reviewer", "admin"})
+        admin = self._require(token, REVIEW_ROLES)
         row = self._submission(submission_id)
         advance(row["status"], "approve", SUBMISSION, "只有待审核的提交可以发布")
         manifest = json.loads(row["manifest_json"])
@@ -102,6 +105,17 @@ class CatalogMixin:
             elif self._release_exists(row["package_id"], row["version"]):
                 raise StoreError("VERSION_IMMUTABLE", "该版本已发布")
             else:
+                release_artifact = row["artifact_path"]
+                if release_artifact and Path(release_artifact).is_file():
+                    dest = self.blob_dir / "releases" / row["package_id"] / f"{row['version']}.zip"
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    if Path(release_artifact).resolve() != dest.resolve():
+                        dest.unlink(missing_ok=True)
+                        try:
+                            os.link(release_artifact, dest)
+                        except OSError:
+                            shutil.copy2(release_artifact, dest)
+                    release_artifact = str(dest)
                 self._db.execute(
                     """
                     INSERT INTO releases
@@ -110,7 +124,7 @@ class CatalogMixin:
                     """,
                     (
                         row["package_id"], row["version"], row["manifest_json"],
-                        row["artifact_path"], row["artifact_sha256"],
+                        release_artifact, row["artifact_sha256"],
                     ),
                 )
                 self._publish_assets(row["id"], row["package_id"], row["version"])
@@ -134,7 +148,7 @@ class CatalogMixin:
         with self._lock:
             self._reject(token, submission_id, reason)
     def _reject(self, token: str, submission_id: str, reason: str) -> None:
-        admin = self._require(token, {"reviewer", "admin"})
+        admin = self._require(token, REVIEW_ROLES)
         if not reason.strip():
             raise StoreError("DESCRIPTION", "退回必须写原因")
         row = self._submission(submission_id)
@@ -153,7 +167,7 @@ class CatalogMixin:
         self._audit(admin.id, "reject", row["package_id"], row["version"])
     def unpublish(self, token: str, package_id: str, version: str, reason: str) -> None:
         with self._lock:
-            admin = self._require(token, {"admin"})
+            admin = self._require(token, REVIEW_ROLES)
             if not reason.strip():
                 raise StoreError("DESCRIPTION", "下架必须写原因")
             row = self._db.execute(
@@ -236,11 +250,11 @@ class CatalogMixin:
             clauses.append("kind = ?")
             params.append(kind)
         if client:
-            clauses.append("clients LIKE ?")
-            params.append(f"%,{client},%")
+            clauses.append("clients LIKE ? ESCAPE '\\'")
+            params.append(_like(f",{client},"))
         if platform:
-            clauses.append("(platforms LIKE ? OR platforms LIKE '%,any,%')")
-            params.append(f"%,{platform},%")
+            clauses.append("(platforms LIKE ? ESCAPE '\\' OR platforms LIKE '%,any,%')")
+            params.append(_like(f",{platform},"))
         needle = query.strip()
         if needle:
             pattern = _like(needle.lower())
@@ -261,7 +275,7 @@ class CatalogMixin:
         total = self._db.execute(
             "SELECT COUNT(*) FROM catalog_index WHERE " + where, tuple(params)
         ).fetchone()[0]
-        size = -1 if limit is None else max(0, int(limit))
+        size = -1 if limit is None else min(max(0, int(limit)), 500)
         order = {
             "updated": "updated_at DESC, package_id ASC",
             "title": "title COLLATE NOCASE ASC, package_id ASC",
@@ -292,7 +306,7 @@ class CatalogMixin:
     def _refresh_catalog_index(self, package_id: str) -> None:
         """把某个包的最新可见版本写进索引；没有可见版本就删掉。"""
         rows = self._db.execute(
-            "SELECT version, manifest_json FROM releases WHERE package_id = ? AND unpublished_at IS NULL",
+            "SELECT version, manifest_json, published_at FROM releases WHERE package_id = ? AND unpublished_at IS NULL",
             (package_id,),
         ).fetchall()
         if not rows:
@@ -310,8 +324,8 @@ class CatalogMixin:
         self._db.execute(
             """
             INSERT INTO catalog_index
-              (package_id, version, kind, title, summary, description, clients, platforms, manifest_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (package_id, version, kind, title, summary, description, clients, platforms, manifest_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(package_id) DO UPDATE SET
               version = excluded.version,
               kind = excluded.kind,
@@ -321,7 +335,7 @@ class CatalogMixin:
               clients = excluded.clients,
               platforms = excluded.platforms,
               manifest_json = excluded.manifest_json,
-              updated_at = CURRENT_TIMESTAMP
+              updated_at = excluded.updated_at
             """,
             (
                 package_id,
@@ -333,6 +347,7 @@ class CatalogMixin:
                 _csv(manifest.get("clients")),
                 _csv(manifest.get("platforms")),
                 best["manifest_json"],
+                best["published_at"],
             ),
         )
         if self._fts_ready:
@@ -351,7 +366,7 @@ class CatalogMixin:
         with self._read():
             return self._list_reviews(token)
     def _list_reviews(self, token: str) -> list[dict]:
-        self._require(token, {"reviewer", "admin"})
+        self._require(token, REVIEW_ROLES)
         rows = self._db.execute(
             """
             SELECT id, package_id, version, status, submit_kind, manifest_json, created_at
@@ -382,12 +397,12 @@ class CatalogMixin:
         package_id: str | None = None,
         action: str | None = None,
     ) -> dict:
-        """审计记录。只给 admin；按 id 倒序，支持按包与动作过滤。
+        """审计记录。审核/管理员可读；按 id 倒序，支持按包与动作过滤。
 
         审计一直是只写不读；这里给运维一个出口，不新增写路径。
         """
         with self._read():
-            self._require(token, {"reviewer", "admin"})
+            self._require(token, REVIEW_ROLES)
             limit = max(1, min(int(limit), 500))
             offset = max(0, int(offset))
             clauses: list[str] = []
@@ -431,7 +446,7 @@ class CatalogMixin:
     ) -> str:
         """审计导出。审核/管理员可读；最多一万条，避免一次拉爆。"""
         with self._read():
-            self._require(token, {"reviewer", "admin"})
+            self._require(token, REVIEW_ROLES)
             clauses: list[str] = []
             params: list[object] = []
             if package_id:
@@ -475,7 +490,7 @@ class CatalogMixin:
     ) -> dict:
         """发布贡献排行/明细。审核/管理员可读；以已发布版本为准。"""
         with self._read():
-            self._require(token, {"reviewer", "admin"})
+            self._require(token, REVIEW_ROLES)
             limit = max(1, min(int(limit), 500))
             accounts = {
                 row["id"]: dict(row)
@@ -544,7 +559,7 @@ class CatalogMixin:
 
     def get_review(self, token: str, submission_id: str) -> dict:
         with self._read():
-            self._require(token, {"reviewer", "admin"})
+            self._require(token, REVIEW_ROLES)
             row = self._submission(submission_id)
             names: list[str] = []
             current_texts: dict[str, str] = {}
@@ -577,9 +592,7 @@ class CatalogMixin:
     def list_versions(self, package_id: str, *, client: str | None = None, platform: str | None = None) -> list[dict]:
         with self._read():
             found = []
-            for item in self._plan_releases():
-                if item["id"] != package_id:
-                    continue
+            for item in self._plan_releases([package_id]):
                 if client and client not in item["clients"]:
                     continue
                 if platform and "any" not in item["platforms"] and platform not in item["platforms"]:
@@ -613,7 +626,7 @@ class CatalogMixin:
         with self._read():
             try:
                 return resolve(
-                    self._plan_releases(),
+                    self._plan_releases([package_id]),
                     package_id=package_id,
                     client=client,
                     platform=platform,
@@ -628,7 +641,7 @@ class CatalogMixin:
         with self._read():
             try:
                 return install_plan(
-                    self._plan_releases(),
+                    self._plan_release_closure(package_id),
                     package_id=package_id,
                     version=version,
                     client=client,
@@ -695,13 +708,26 @@ class CatalogMixin:
             (json.dumps(published, ensure_ascii=False), row["package_id"], row["version"]),
         )
         self._publish_assets(row["id"], row["package_id"], row["version"])
-    def _plan_releases(self) -> list[dict]:
-        rows = self._db.execute(
-            """
-            SELECT package_id, version, manifest_json, artifact_sha256, published_at
-            FROM releases WHERE unpublished_at IS NULL
-            """
-        ).fetchall()
+    def _plan_releases(self, package_ids: list[str] | set[str] | None = None) -> list[dict]:
+        if package_ids is None:
+            rows = self._db.execute(
+                """
+                SELECT package_id, version, manifest_json, artifact_sha256, published_at
+                FROM releases WHERE unpublished_at IS NULL
+                """
+            ).fetchall()
+        else:
+            targets = sorted({str(item) for item in package_ids if str(item)})
+            if not targets:
+                return []
+            placeholders = ",".join("?" for _ in targets)
+            rows = self._db.execute(
+                f"""
+                SELECT package_id, version, manifest_json, artifact_sha256, published_at
+                FROM releases WHERE unpublished_at IS NULL AND package_id IN ({placeholders})
+                """,
+                tuple(targets),
+            ).fetchall()
         found = []
         for row in rows:
             manifest = json.loads(row["manifest_json"])
@@ -716,6 +742,28 @@ class CatalogMixin:
                 "artifact_sha256": row["artifact_sha256"],
             })
         return found
+
+    def _plan_release_closure(self, package_id: str) -> list[dict]:
+        """按依赖图按需加载目标包及其传递依赖的已发布版本，避免全表反序列化。"""
+        seen: set[str] = set()
+        pending: set[str] = {package_id}
+        collected: list[dict] = []
+        while pending:
+            batch = pending - seen
+            if not batch:
+                break
+            seen.update(batch)
+            items = self._plan_releases(batch)
+            collected.extend(items)
+            next_ids: set[str] = set()
+            for item in items:
+                depends = item["manifest"].get("depends") or {}
+                for key in ("store", "skills", "mcp"):
+                    for dep in depends.get(key) or []:
+                        if isinstance(dep, dict) and dep.get("id"):
+                            next_ids.add(str(dep["id"]))
+            pending = next_ids - seen
+        return collected
     def _visible_release(self, package_id: str, version: str) -> sqlite3.Row | None:
         return self._db.execute(
             """

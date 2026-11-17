@@ -81,6 +81,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       return node;
     }
 
+    function cell(value, label) {
+      const td = text("td", value);
+      if (label) td.dataset.label = label;
+      return td;
+    }
+
     function setState(id, message, isError) {
       const node = document.getElementById(id);
       node.textContent = message;
@@ -115,10 +121,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         board.classList.toggle("hidden", me.role !== "admin");
         gate.classList.toggle("hidden", me.role === "admin");
         const reviewer = me.role === "reviewer" || me.role === "admin";
+        document.getElementById("nav-group-gov").classList.toggle("hidden", !reviewer);
         document.getElementById("nav-audit").classList.toggle("hidden", !reviewer);
         document.getElementById("nav-review").classList.toggle("hidden", !reviewer);
         document.getElementById("nav-contributions").classList.toggle("hidden", !reviewer);
         document.getElementById("nav-admin-users").classList.toggle("hidden", me.role !== "admin");
+        if (reviewer) refreshReviewBadge();
+        else document.getElementById("review-badge").classList.add("hidden");
         if (me.role === "publisher") gate.textContent = "作者不能管理用户。";
         if (me.role === "reviewer") gate.textContent = "审核不能管理用户；用户管理只给管理员。";
         if (!named) gate.textContent = "先用审核的口令登录。";
@@ -218,13 +227,27 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       show(path || "shelf");
     }
 
+    async function refreshReviewBadge() {
+      const badge = document.getElementById("review-badge");
+      if (!badge) return;
+      try {
+        const data = await api("/v1/reviews");
+        const count = (data.items || []).length;
+        badge.textContent = count > 0 ? String(count) : "";
+        badge.classList.toggle("hidden", count === 0);
+      } catch {
+        badge.classList.add("hidden");
+      }
+    }
+
     function card(item, shelf) {
       const article = document.createElement("article");
       article.className = "card goods";
+      article.dataset.kind = item.kind || "";
       const tags = document.createElement("div");
       tags.className = "tags";
       tags.append(
-        text("span", KIND_LABEL[item.kind] || item.kind, "tag"),
+        text("span", KIND_LABEL[item.kind] || item.kind, "tag kind"),
         text("span", item.version, "tag gold"),
       );
       const author = item.author && item.author.display_name ? item.author.display_name : "";
@@ -233,7 +256,9 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       row.className = "row";
       const open = text("button", "查看版本", "btn primary");
       open.type = "button";
-      open.addEventListener("click", () => openDetail(item.id, shelf === "runtime"));
+      const enter = () => openDetail(item.id, shelf === "runtime");
+      open.addEventListener("click", (event) => { event.stopPropagation(); enter(); });
+      article.addEventListener("click", enter);
       row.append(open);
       article.append(
         tags,
@@ -366,8 +391,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         versionSelect.replaceChildren();
         versions.forEach((item) => {
           const tr = document.createElement("tr");
-          [item.version, item.changes, platformList(item.platforms), (item.clients || []).join(", ")]
-            .forEach((value) => tr.append(text("td", value)));
+          [
+            [item.version, "版本"],
+            [item.changes, "变更"],
+            [platformList(item.platforms), "适用平台"],
+            [(item.clients || []).join(", "), "AI 工具"],
+          ].forEach(([value, label]) => tr.append(cell(value, label)));
           rows.append(tr);
           versionSelect.append(new Option(item.version, item.version));
         });
@@ -537,6 +566,9 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         document.getElementById("audit-more").classList.add("hidden");
         return;
       }
+      auditAbort?.abort();
+      auditAbort = new AbortController();
+      const seq = ++auditSeq;
       if (reset) {
         auditOffset = 0;
         document.getElementById("audit-rows").replaceChildren();
@@ -548,18 +580,21 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       if (packageId) params.set("package_id", packageId);
       setState("audit-state", "正在读取。", false);
       try {
-        const page = await api("/v1/audit?" + params.toString());
+        const page = await api("/v1/audit?" + params.toString(), { signal: auditAbort.signal });
+        if (seq !== auditSeq) return;
         const rows = document.getElementById("audit-rows");
+        const labels = ["#", "操作者", "动作", "产品", "版本", "通道", "时间"];
         (page.items || []).forEach((item) => {
           const tr = document.createElement("tr");
           [item.id, item.actor_name || item.actor, item.action, item.package_id || "", item.version || "", item.channel || "", item.at || ""]
-            .forEach((value) => tr.append(text("td", value)));
+            .forEach((value, idx) => tr.append(cell(value, labels[idx])));
           rows.append(tr);
         });
         auditOffset += (page.items || []).length;
         setState("audit-state", `共 ${page.total} 条，已显示 ${auditOffset} 条。`, false);
         document.getElementById("audit-more").classList.toggle("hidden", auditOffset >= page.total);
       } catch (error) {
+        if (error.name === "AbortError" || seq !== auditSeq) return;
         setState("audit-state", error.message, true);
       }
     }
@@ -596,16 +631,50 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       show(state.kind === "runtime" ? "runtime" : "shelf");
     });
 
+    function renderPlanSteps(steps) {
+      const container = document.getElementById("plan-steps");
+      container.replaceChildren();
+      const opTitles = {
+        download: "下载制品",
+        unpack: "解压到本地目录",
+        place_bin: "放置可执行命令",
+        mcp_add: "写入 MCP 客户端配置",
+        ensure_bin: "检查本机外部命令",
+        ensure_product: "检查前置商店产品",
+        need_secret: "配置产品密钥（环境变量）",
+        verify: "校验安装结果",
+        plugin_stage: "暂存插件文件（不在商店执行）",
+        plugin_confirm: "在 DSH Plugins 中确认启用",
+        check_bin: "核对命令可用性",
+      };
+      (steps || []).forEach((step, idx) => {
+        const cardNode = document.createElement("div");
+        cardNode.className = "plan-step";
+        cardNode.append(text("strong", `${idx + 1}. ${opTitles[step.op] || step.op}`));
+        const summary = step.dest || step.url || step.name || step.id || step.bin_name || step.command || "";
+        if (summary) cardNode.append(text("code", summary));
+        if (step.sha256) cardNode.append(text("p", `sha256: ${step.sha256}`, "foot"));
+        if (step.description) cardNode.append(text("p", step.description, "foot"));
+        container.append(cardNode);
+      });
+    }
+
+    let lastPlanOpener = null;
     document.getElementById("show-plan").addEventListener("click", async () => {
       const button = document.getElementById("show-plan");
       const body = document.getElementById("plan-body");
+      const stepsBox = document.getElementById("plan-steps");
+      lastPlanOpener = document.activeElement;
+      setState("plan-copy-state", "", false);
       document.getElementById("plan-drawer").showModal();
       if (!signedIn()) {
-        body.textContent = "请先登录。本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具浏览、下载、使用，请查看 连接 菜单。";
+        stepsBox.replaceChildren(text("p", "请先登录。本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具浏览、下载、使用，请查看 连接 菜单。", "state"));
+        body.textContent = "";
         return;
       }
       button.disabled = true;
-      body.textContent = "正在生成安装说明。";
+      stepsBox.replaceChildren(text("p", "正在生成安装说明。", "state"));
+      body.textContent = "";
       try {
         const plan = await api("/v1/install-plan", {
           method: "POST",
@@ -616,14 +685,32 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
             platform: document.getElementById("plan-platform").value,
           }),
         });
-        body.textContent = (plan.steps || []).map((step) => JSON.stringify(step)).join("\n");
+        renderPlanSteps(plan.steps || []);
+        body.textContent = JSON.stringify(plan, null, 2);
       } catch (error) {
-        body.textContent = (error.rule ? error.rule + " " : "") + error.message;
+        stepsBox.replaceChildren(text("p", (error.rule ? error.rule + " " : "") + error.message, "state error"));
       } finally {
         button.disabled = false;
       }
     });
-    document.getElementById("close-plan").addEventListener("click", () => document.getElementById("plan-drawer").close());
+    document.getElementById("copy-plan").addEventListener("click", async () => {
+      const raw = document.getElementById("plan-body").textContent;
+      if (!raw) return;
+      try {
+        await navigator.clipboard.writeText(raw);
+        setState("plan-copy-state", "已复制安装计划 JSON，可交给 store install 执行。", false);
+      } catch {
+        setState("plan-copy-state", "复制失败，请展开上方 JSON 手动复制。", true);
+      }
+    });
+    document.getElementById("close-plan").addEventListener("click", () => {
+      document.getElementById("plan-drawer").close();
+      lastPlanOpener?.focus();
+    });
+    document.getElementById("plan-drawer").addEventListener("close", () => {
+      lastPlanOpener?.focus();
+      lastPlanOpener = null;
+    });
 
     document.getElementById("new-product").addEventListener("click", () => openForm("new", null, null));
     document.getElementById("new-version").addEventListener("click", () => openForm("new_version", null, state.base));
@@ -634,6 +721,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     let pluginFiles = null;
     let catalogSeq = 0;
     let catalogAbort = null;
+    let reviewSeq = 0;
+    let reviewAbort = null;
+    let auditSeq = 0;
+    let auditAbort = null;
+    let contribSeq = 0;
+    let contribAbort = null;
     let readingFiles = false;
 
     function openForm(mode, submissionId, manifest) {
@@ -749,7 +842,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       document.getElementById("runtime-file").classList.toggle("hidden", !runtime);
       document.getElementById("depends-group").classList.toggle("hidden", knowledge || plugin);
       document.getElementById("secrets-group").classList.toggle("hidden", knowledge);
-      document.getElementById("artifact-group").classList.toggle("hidden", !skill && !runtime && !knowledge && !plugin);
+      const hasArtifact = skill || runtime || knowledge || plugin;
+      document.getElementById("artifact-group").classList.toggle("hidden", !hasArtifact);
+      document.querySelectorAll(".form-nav a[data-group]").forEach((link) => {
+        const target = document.getElementById(link.dataset.group);
+        link.classList.toggle("hidden", !target || target.classList.contains("hidden"));
+      });
+      updateArtifactPreview([]);
       if (plugin) {
         const platforms = document.getElementById("f-platforms");
         const clients = document.getElementById("f-clients");
@@ -786,6 +885,34 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     document.getElementById("f-plugin-dir").addEventListener("change", (event) => {
       ingestPluginFiles(event.target.files);
     });
+    document.getElementById("f-runtime-file").addEventListener("change", (event) => {
+      const file = event.target.files && event.target.files[0];
+      updateArtifactPreview(file ? [{ name: file.name, size: file.size }] : []);
+    });
+
+    function updateArtifactPreview(entries, ignoredCount = 0) {
+      const box = document.getElementById("artifact-preview");
+      if (!box) return;
+      if (!entries || !entries.length) {
+        box.classList.add("hidden");
+        box.replaceChildren();
+        return;
+      }
+      const totalBytes = entries.reduce((sum, item) => sum + (item.size || 0), 0);
+      const sizeText = totalBytes >= 1024 * 1024
+        ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MiB`
+        : `${(totalBytes / 1024).toFixed(1)} KiB`;
+      const overLimit = totalBytes > 32 * 1024 * 1024;
+      const summary = `已选 ${entries.length} 个文件（${sizeText} / 32 MiB）` +
+        (ignoredCount ? `，已自动忽略 ${ignoredCount} 个系统/规则尾巴文件` : "") +
+        (overLimit ? " — 已超过 32 MiB 上限！" : "");
+      box.classList.remove("hidden");
+      box.replaceChildren(text("p", summary, overLimit ? "field-error" : "foot"));
+      const list = document.createElement("ul");
+      entries.slice(0, 20).forEach((item) => list.append(text("li", item.name)));
+      if (entries.length > 20) list.append(text("li", `……其余 ${entries.length - 20} 个文件`));
+      box.append(list);
+    }
 
     function isIgnoredClientPath(rel) {
       const clean = String(rel || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -843,11 +970,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     async function ingestSkillFiles(fileList) {
       readingFiles = true;
       const incoming = {};
-      let count = 0;
+      const preview = [];
+      let ignored = 0;
       try {
         for (const file of fileList) {
           const rel = relativeFromPicker(file);
-          if (!rel || isIgnoredClientPath(rel)) continue;
+          if (!rel || isIgnoredClientPath(rel)) { ignored += 1; continue; }
           if (rel === "manifest.json") {
             try {
               fillFromManifest(JSON.parse(await file.text()));
@@ -858,17 +986,19 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           }
           if (rel === "SKILL.md") {
             document.getElementById("f-skill").value = await file.text();
-            count += 1;
+            preview.push({ name: rel, size: file.size });
             continue;
           }
           incoming[rel] = await b64(await file.arrayBuffer());
-          count += 1;
+          preview.push({ name: rel, size: file.size });
         }
         skillExtras = incoming;
+        const count = preview.length;
         const note = document.getElementById("skill-dir-note");
         note.textContent = count
           ? `已读入 ${count} 个文件。清单会填进表单，不随制品提交。系统尾巴文件不提交。`
           : "清单会填进表单，不随制品提交。系统尾巴文件不提交。";
+        updateArtifactPreview(preview, ignored);
       } finally {
         readingFiles = false;
       }
@@ -877,17 +1007,21 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     async function ingestNoteFiles(fileList) {
       readingFiles = true;
       const incoming = {};
+      const preview = [];
+      let ignored = 0;
       try {
         for (const file of fileList) {
           const rel = relativeFromPicker(file);
-          if (!rel || isIgnoredClientPath(rel) || rel.includes("/")) continue;
-          if (!rel.toLowerCase().endsWith(".md")) continue;
+          if (!rel || isIgnoredClientPath(rel) || rel.includes("/")) { ignored += 1; continue; }
+          if (!rel.toLowerCase().endsWith(".md")) { ignored += 1; continue; }
           incoming[rel] = await b64(await file.arrayBuffer());
+          preview.push({ name: rel, size: file.size });
         }
         noteFiles = incoming;
         const count = Object.keys(incoming).length;
         document.getElementById("notes-dir-note").textContent =
           `已保留根上 ${count} 篇 Markdown。系统尾巴文件会被丢掉。子目录里的文件不进入知识包。`;
+        updateArtifactPreview(preview, ignored);
       } finally {
         readingFiles = false;
       }
@@ -896,16 +1030,19 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     async function ingestPluginFiles(fileList) {
       readingFiles = true;
       const incoming = {};
+      const preview = [];
+      let ignored = 0;
       let manifestData = null;
       try {
         for (const file of fileList) {
           const rel = relativeFromPicker(file);
-          if (!rel || isIgnoredClientPath(rel)) continue;
+          if (!rel || isIgnoredClientPath(rel)) { ignored += 1; continue; }
           if (rel === "manifest.json") {
             try { manifestData = JSON.parse(await file.text()); } catch { /* 只填表 */ }
             continue;
           }
           incoming[rel] = await b64(await file.arrayBuffer());
+          preview.push({ name: rel, size: file.size });
         }
         pluginFiles = incoming;
         const names = Object.keys(incoming).sort();
@@ -914,6 +1051,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         document.getElementById("plugin-dir-note").textContent = names.length
           ? `已读入 ${names.length} 个文件。根上必须有 package.json；manifest.json 只填表，不随制品提交。`
           : "还没有读入插件文件。根上必须有 package.json。";
+        updateArtifactPreview(preview, ignored);
         if (manifestData) fillFromManifest(manifestData);
       } finally {
         readingFiles = false;
@@ -940,11 +1078,12 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         const platform = document.getElementById("f-platforms").value.trim();
         const file = document.getElementById("f-runtime-file").files[0];
         if (!file) throw Object.assign(new Error("追加平台需要上传这个平台的文件"), { rule: "RUNTIME_ASSET" });
-        const digest = await sha256(await file.arrayBuffer());
+        const buf = await file.arrayBuffer();
+        const digest = await sha256(buf);
         copy.platforms = [platform];
         copy.runtime = copy.runtime || { bin_name: document.getElementById("f-bin").value.trim() };
         copy.runtime.assets = [{ platform, path: `${platform}/${file.name}`, sha256: digest }];
-        return { manifest: copy, files: { [`${platform}/${file.name}`]: await b64(await file.arrayBuffer()) } };
+        return { manifest: copy, files: { [`${platform}/${file.name}`]: await b64(buf) } };
       }
       const manifest = {
         spec_version: 1,
@@ -970,7 +1109,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         }),
       };
       if (kind === "plugin") {
-        const files = pluginFiles || {};
+        const files = { ...(pluginFiles || {}) };
         if (!files["package.json"]) throw new Error("插件目录根上要有 package.json。请先选择插件目录。");
         const form = document.getElementById("f-plugin-form").value;
         const plugin = {
@@ -989,7 +1128,6 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         if (!plugin.client) delete plugin.client;
         manifest.plugin = plugin;
         manifest.invoke = { form: "install_plugin" };
-        Object.assign(files, pluginFiles);
         return { manifest, files };
       }
       const extName = document.getElementById("f-ext-name").value.trim();
@@ -1051,27 +1189,30 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         manifest.invoke = { form: "exec_bin", bin_name: bin };
         if (file) {
           const platform = (manifest.platforms || [])[0];
-          const digest = await sha256(await file.arrayBuffer());
+          const buf = await file.arrayBuffer();
+          const digest = await sha256(buf);
           const path = `${platform}/${file.name}`;
           manifest.runtime.assets = [{ platform, path, sha256: digest }];
-          files[path] = await b64(await file.arrayBuffer());
+          files[path] = await b64(buf);
         }
       }
       return { manifest, files };
     }
 
+    function bytesToBase64(bytes) {
+      const chunks = [];
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
+      }
+      return btoa(chunks.join(""));
+    }
+
     function b64text(value) {
-      const bytes = new TextEncoder().encode(value);
-      let binary = "";
-      bytes.forEach((item) => { binary += String.fromCharCode(item); });
-      return btoa(binary);
+      return bytesToBase64(new TextEncoder().encode(value));
     }
 
     async function b64(buffer) {
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      bytes.forEach((item) => { binary += String.fromCharCode(item); });
-      return btoa(binary);
+      return bytesToBase64(new Uint8Array(buffer));
     }
 
     async function sha256(buffer) {
@@ -1086,6 +1227,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       const rules = document.getElementById("form-rules");
       button.disabled = true;
       error.hidden = true;
+      clearFieldFindings();
       rules.replaceChildren();
       let missing = firstEmpty([
         ["f-id", "id"],
@@ -1141,11 +1283,52 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       }
     });
 
+    function clearFieldFindings() {
+      document.querySelectorAll("#sheet [aria-invalid]").forEach((node) => node.removeAttribute("aria-invalid"));
+      document.querySelectorAll("#sheet .inline-finding").forEach((node) => node.remove());
+    }
+
+    function fieldForPath(path) {
+      if (!path) return null;
+      const direct = {
+        id: "f-id", version: "f-version", kind: "f-kind",
+        "author.display_name": "f-author", title: "f-title", summary: "f-summary",
+        description: "f-description", changes: "f-changes",
+        platforms: "f-platforms", clients: "f-clients",
+        "knowledge.entry": "f-entry", "mcp.transport": "f-transport",
+        "mcp.url": "f-url", "mcp.command": "f-command", "mcp.args": "f-args",
+        "invoke.form": "f-invoke", "runtime.bin_name": "f-bin",
+        "plugin.tier": "f-plugin-tier", "plugin.form": "f-plugin-form",
+        "plugin.entry": "f-plugin-entry", "plugin.client": "f-plugin-client",
+        "plugin.patch": "f-plugin-patch", "plugin.dsh": "f-plugin-dsh",
+        "plugin.files": "f-plugin-files", "plugin.capabilities": "f-plugin-caps",
+        "plugin.external": "f-plugin-external",
+        secrets: "f-secrets", "depends.store": "f-store",
+        "depends.skills": "f-skills", "depends.mcp": "f-mcp-deps",
+      };
+      if (direct[path]) return document.getElementById(direct[path]);
+      const prefix = Object.keys(direct).find((key) => path.startsWith(key + ".") || path.startsWith(key + "["));
+      return prefix ? document.getElementById(direct[prefix]) : null;
+    }
+
     function showFindings(container, findings) {
       container.replaceChildren();
+      clearFieldFindings();
+      let firstField = null;
       findings.forEach((item) => {
         container.append(text("div", `${item.rule}  ${item.path}  ${item.message}`.trim(), "rule"));
+        const field = fieldForPath(item.path);
+        if (field) {
+          field.setAttribute("aria-invalid", "true");
+          const hint = text("p", `${item.rule}: ${item.message}`, "field-error inline-finding");
+          field.insertAdjacentElement("afterend", hint);
+          if (!firstField) firstField = field;
+        }
       });
+      if (firstField) {
+        firstField.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstField.focus({ preventScroll: true });
+      }
     }
 
     async function loadMine() {
@@ -1246,12 +1429,16 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     }
 
     async function openReview(submissionId, button) {
+      reviewAbort?.abort();
+      reviewAbort = new AbortController();
+      const seq = ++reviewSeq;
       document.querySelectorAll("#review-queue .list-btn").forEach((item) => item.setAttribute("aria-pressed", "false"));
       button.setAttribute("aria-pressed", "true");
       const detail = document.getElementById("review-detail");
       detail.replaceChildren(text("p", "正在读取。", "state"));
       try {
-        const sheetData = await api("/v1/reviews/" + submissionId);
+        const sheetData = await api("/v1/reviews/" + submissionId, { signal: reviewAbort.signal });
+        if (seq !== reviewSeq) return;
         detail.replaceChildren();
         const head = document.createElement("div");
         head.className = "group review-head";
@@ -1340,6 +1527,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           note.textContent = "";
           try {
             await api(`/v1/submissions/${submissionId}/approve`, { method: "POST" });
+            setState("review-banner", `已发布 ${sheetData.manifest.id}@${sheetData.manifest.version}。`, false);
+            refreshReviewBadge();
             loadReviews();
           } catch (error) {
             note.textContent = (error.rule ? error.rule + " " : "") + error.message;
@@ -1348,7 +1537,11 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           }
         });
         reject.addEventListener("click", async () => {
-          if (!reason.value.trim()) { reason.focus(); return; }
+          if (!reason.value.trim()) {
+            note.textContent = "退回必须填写原因。";
+            reason.focus();
+            return;
+          }
           publish.disabled = true;
           reject.disabled = true;
           note.textContent = "";
@@ -1357,6 +1550,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
               method: "POST",
               body: JSON.stringify({ reason: reason.value.trim() }),
             });
+            setState("review-banner", `已退回 ${sheetData.manifest.id}@${sheetData.manifest.version}。`, false);
+            refreshReviewBadge();
             loadReviews();
           } catch (error) {
             note.textContent = (error.rule ? error.rule + " " : "") + error.message;
@@ -1400,12 +1595,24 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         fileDiffs.append(text("h2", "制品差异"));
         const diffs = sheetData.file_diffs || [];
         if (!diffs.length) fileDiffs.append(text("p", "没有上一份制品，或正文没有变化。", "foot"));
-        diffs.forEach((item) => {
-          fileDiffs.append(text("p", `${item.status}  ${item.path}`, "foot"));
-          fileDiffs.append(renderDiff(item.diff || ""));
+        diffs.forEach((item, index) => {
+          const patch = item.diff || "";
+          let adds = 0;
+          let dels = 0;
+          patch.split("\n").forEach((line) => {
+            if (line.startsWith("+") && !line.startsWith("+++")) adds += 1;
+            else if (line.startsWith("-") && !line.startsWith("---")) dels += 1;
+          });
+          const details = document.createElement("details");
+          details.className = "diff-collapse";
+          if (index < 2) details.open = true;
+          details.append(text("summary", `${item.status}  ${item.path}  (+${adds} / -${dels})`));
+          details.append(renderDiff(patch));
+          fileDiffs.append(details);
         });
         detail.append(files, fileDiffs);
       } catch (error) {
+        if (error.name === "AbortError" || seq !== reviewSeq) return;
         detail.replaceChildren(text("p", error.message, "state error"));
       }
     }
@@ -1415,11 +1622,36 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       document.documentElement.setAttribute("data-theme", savedTheme);
       document.getElementById("theme").textContent = savedTheme === "dark" ? "浅色" : "深色";
     }
+    let lastLoginOpener = null;
     function openLogin() {
+      lastLoginOpener = document.activeElement;
       setState("login-state", "", false);
       document.getElementById("login-box").showModal();
       document.getElementById("login-username").focus();
     }
+    document.getElementById("login-box").addEventListener("close", () => {
+      lastLoginOpener?.focus();
+      lastLoginOpener = null;
+    });
+
+    function wireArrowGroup(containerId, selector) {
+      const box = document.getElementById(containerId);
+      if (!box) return;
+      box.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        const buttons = [...box.querySelectorAll(selector)].filter((item) => !item.disabled);
+        const current = buttons.indexOf(document.activeElement);
+        if (current < 0) return;
+        event.preventDefault();
+        const next = event.key === "ArrowRight"
+          ? (current + 1) % buttons.length
+          : (current - 1 + buttons.length) % buttons.length;
+        buttons[next].focus();
+        buttons[next].click();
+      });
+    }
+    wireArrowGroup("kind-chips", "button[data-kind]");
+    wireArrowGroup("connect-tab-buttons", "button[data-tab]");
 
     document.getElementById("login-submit").addEventListener("click", async () => {
       const missing = firstEmpty([
@@ -1679,10 +1911,14 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         setState("contributions-state", "先用审核账号登录。贡献只给审核看。", false);
         return;
       }
+      contribAbort?.abort();
+      contribAbort = new AbortController();
+      const seq = ++contribSeq;
       setState("contributions-state", "正在读取贡献。", false);
       try {
         const query = accountId ? "?account_id=" + encodeURIComponent(accountId) : "";
-        const data = await api("/v1/contributions" + query);
+        const data = await api("/v1/contributions" + query, { signal: contribAbort.signal });
+        if (seq !== contribSeq) return;
         if (!accountId) {
           detail.replaceChildren();
           rows.replaceChildren();
@@ -1691,16 +1927,18 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
             return;
           }
           setState("contributions-state", "", false);
+          const labels = ["#", "昵称", "姓名", "部门", "用户名", "产品", "版本", "最近发布"];
           (data.items || []).forEach((item, index) => {
             const tr = document.createElement("tr");
             [index + 1, item.nickname || "", item.real_name || "", item.department || "", item.username || "",
-             item.product_count, item.versions, item.last_at || ""].forEach((value) => tr.append(text("td", value)));
-            const cell = document.createElement("td");
+             item.product_count, item.versions, item.last_at || ""].forEach((value, idx) => tr.append(cell(value, labels[idx])));
+            const opCell = document.createElement("td");
+            opCell.dataset.label = "操作";
             const button = text("button", "明细", "btn");
             button.type = "button";
             button.addEventListener("click", () => loadContributions(item.account_id));
-            cell.append(button);
-            tr.append(cell);
+            opCell.append(button);
+            tr.append(opCell);
             rows.append(tr);
           });
           return;
@@ -1741,6 +1979,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         detail.append(group);
         setState("contributions-state", "", false);
       } catch (error) {
+        if (error.name === "AbortError" || seq !== contribSeq) return;
         setState("contributions-state", error.message, true);
       }
     }
@@ -1813,11 +2052,11 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         (data.items || []).forEach((item) => {
           const tr = document.createElement("tr");
           tr.append(
-            text("td", item.nickname || item.display_name),
-            text("td", item.real_name || ""),
-            text("td", item.department || ""),
-            text("td", item.job_title || ""),
-            text("td", item.username),
+            cell(item.nickname || item.display_name, "昵称"),
+            cell(item.real_name || "", "姓名"),
+            cell(item.department || "", "部门"),
+            cell(item.job_title || "", "岗位"),
+            cell(item.username, "用户名"),
           );
           const role = document.createElement("select");
           role.append(new Option("作者", "publisher"), new Option("审核", "reviewer"), new Option("管理员", "admin"));

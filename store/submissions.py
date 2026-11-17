@@ -17,6 +17,7 @@ from typing import Callable
 from store.base import _MAX_BYTES, _RETRYABLE_URLS, _UPLOAD_TTL_HOURS
 from store.blobs import safe_extract, sha256_file, write_zip
 from store.errors import Principal, StoreError
+from store.roles import ADMIN_ROLES, PUBLISHER_ROLES
 from store.models import SubmitResult
 from store.safety import PathEscape, safe_join
 from store.semver import cmp as _cmp
@@ -51,7 +52,7 @@ class SubmissionMixin:
         submit_kind: str,
         channel: str,
     ) -> SubmitResult:
-        publisher = self._require(token, {"publisher", "reviewer", "admin"})
+        publisher = self._require(token, PUBLISHER_ROLES)
         stored = self._prepare(publisher, manifest, submit_kind)
         package_id = str(stored.get("id") or "")
         version = str(stored.get("version") or "")
@@ -90,7 +91,7 @@ class SubmissionMixin:
                 token, manifest, submit_kind=submit_kind, byte_size=byte_size, channel=channel,
             )
     def _begin_submit(self, token: str, manifest: dict, *, submit_kind: str, byte_size: int, channel: str) -> dict:
-        publisher = self._require(token, {"publisher", "reviewer", "admin"})
+        publisher = self._require(token, PUBLISHER_ROLES)
         if byte_size < 0 or byte_size > _MAX_BYTES:
             raise StoreError("CHECKSUM", "制品大小不在允许范围内")
         # 只开上传不动手的人会把状态与 blob 一直留着。这里顺带清一次，
@@ -115,7 +116,7 @@ class SubmissionMixin:
         with self._lock:
             self._save_upload(token, submission_id, data)
     def _save_upload(self, token: str, submission_id: str, data: bytes) -> None:
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能上传别人的制品")
@@ -145,7 +146,7 @@ class SubmissionMixin:
             ready = self._finish_ready(token, submission_id)
         return self._finish_checked(ready, channel=channel, probe=probe)
     def _finish_ready(self, token: str, submission_id: str) -> dict:
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能完成别人的提交")
@@ -153,6 +154,11 @@ class SubmissionMixin:
             raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
         if not row["artifact_path"]:
             raise StoreError("CHECKSUM", "还没有上传制品")
+        self._db.execute(
+            "UPDATE submissions SET status = 'validating' WHERE id = ? AND status = 'uploading'",
+            (submission_id,),
+        )
+        self._db.commit()
         return {
             "actor": principal.id,
             "submission_id": submission_id,
@@ -172,32 +178,41 @@ class SubmissionMixin:
         submission_id = ready["submission_id"]
         archive: Path = ready["archive"]
         stored = json.loads(ready["manifest_json"])
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            try:
-                safe_extract(archive, root)
-            except (zipfile.BadZipFile, ValueError, OSError):
-                with self._lock:
-                    self._finish_reject_archive(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
-                return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
-            (root / "manifest.json").write_text(ready["manifest_json"], encoding="utf-8")
-            report = validate_path(
-                root, releases=ready["releases"], check_urls=True, probe=probe,
-            )
-            if report.ok:
-                with self._lock:
-                    self._finish_commit(
-                        ready, "pending", report, channel=channel, keep_assets=root, stored=stored,
-                    )
-                return SubmitResult(submission_id, "pending", [])
-        rules = report.rules()
-        status = "uploading" if set(rules) <= _RETRYABLE_URLS else "rejected"
-        with self._lock:
-            self._finish_commit(ready, status, report, channel=channel, keep_assets=None, stored=None)
-        return SubmitResult(submission_id, status, rules)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                try:
+                    safe_extract(archive, root)
+                except (zipfile.BadZipFile, ValueError, OSError):
+                    with self._lock:
+                        self._finish_reject_archive(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
+                    return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
+                (root / "manifest.json").write_text(ready["manifest_json"], encoding="utf-8")
+                report = validate_path(
+                    root, releases=ready["releases"], check_urls=True, probe=probe,
+                )
+                if report.ok:
+                    with self._lock:
+                        self._finish_commit(
+                            ready, "pending", report, channel=channel, keep_assets=root, stored=stored,
+                        )
+                    return SubmitResult(submission_id, "pending", [])
+            rules = report.rules()
+            status = "uploading" if set(rules) <= _RETRYABLE_URLS else "rejected"
+            with self._lock:
+                self._finish_commit(ready, status, report, channel=channel, keep_assets=None, stored=None)
+            return SubmitResult(submission_id, status, rules)
+        except Exception:
+            with self._lock:
+                self._db.execute(
+                    "UPDATE submissions SET status = 'uploading' WHERE id = ? AND status = 'validating'",
+                    (submission_id,),
+                )
+                self._db.commit()
+            raise
     def _finish_reject_archive(self, submission_id: str, lines: list[str]) -> None:
         row = self._submission(submission_id)
-        if row["status"] != "uploading":
+        if row["status"] not in {"uploading", "validating"}:
             raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
         self._reject_upload(row, lines)
     def _finish_commit(
@@ -211,7 +226,7 @@ class SubmissionMixin:
         stored: dict | None,
     ) -> None:
         row = self._submission(ready["submission_id"])
-        if row["status"] != "uploading":
+        if row["status"] not in {"uploading", "validating"}:
             raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
         archive: Path = ready["archive"]
         if keep_assets is not None and stored is not None:
@@ -283,7 +298,7 @@ class SubmissionMixin:
         return len(rows) + len(revisions)
     def list_my_submissions(self, token: str) -> list[dict]:
         with self._read():
-            principal = self._require(token, {"publisher", "reviewer", "admin"})
+            principal = self._require(token, PUBLISHER_ROLES)
             rows = self._db.execute(
                 """
                 SELECT id, package_id, version, status, review_reason
@@ -294,7 +309,7 @@ class SubmissionMixin:
             return [dict(row) for row in rows]
     def withdraw(self, token: str, submission_id: str) -> None:
         with self._lock:
-            principal = self._require(token, {"publisher", "reviewer", "admin"})
+            principal = self._require(token, PUBLISHER_ROLES)
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能撤回别人的提交")
@@ -308,7 +323,7 @@ class SubmissionMixin:
         with self._read():
             return self._get_submission(token, submission_id)
     def _get_submission(self, token: str, submission_id: str) -> dict:
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能查看别人的提交")
@@ -333,7 +348,7 @@ class SubmissionMixin:
         *,
         channel: str,
     ) -> SubmitResult:
-        principal = self._require(token, {"publisher", "reviewer", "admin"})
+        principal = self._require(token, PUBLISHER_ROLES)
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能修订别人的提交")
@@ -406,7 +421,7 @@ class SubmissionMixin:
     ) -> dict:
         """修订上传的第一段：静态校验清单，登记一条待上传的修订。"""
         with self._lock:
-            publisher = self._require(token, {"publisher", "reviewer", "admin"})
+            publisher = self._require(token, PUBLISHER_ROLES)
             if byte_size < 0 or byte_size > _MAX_BYTES:
                 raise StoreError("CHECKSUM", "制品大小不在允许范围内")
             row = self._submission(submission_id)
@@ -446,7 +461,7 @@ class SubmissionMixin:
 
     def save_revise_upload(self, token: str, submission_id: str, data: bytes) -> None:
         with self._lock:
-            principal = self._require(token, {"publisher", "reviewer", "admin"})
+            principal = self._require(token, PUBLISHER_ROLES)
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能上传别人的修订")
@@ -476,7 +491,7 @@ class SubmissionMixin:
     def finish_revise(self, token: str, submission_id: str) -> "SubmitResult":
         """修订上传的第三段：解包、校验，然后按原单替换。"""
         with self._lock:
-            principal = self._require(token, {"publisher", "reviewer", "admin"})
+            principal = self._require(token, PUBLISHER_ROLES)
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能完成别人的修订")
@@ -539,7 +554,7 @@ class SubmissionMixin:
         return [item["rule"] for item in self.explain_manifest(token, manifest) if item["severity"] == "error"]
     def explain_manifest(self, token: str, manifest: dict) -> list[dict]:
         with self._read():
-            self._require(token, {"publisher", "reviewer", "admin"})
+            self._require(token, PUBLISHER_ROLES)
             report = validate_manifest(manifest, releases=self._releases())
             return [
                 {"rule": item.rule, "path": item.path, "message": item.message, "severity": item.severity}
@@ -743,15 +758,15 @@ class SubmissionMixin:
     def transfer_namespace(self, token: str, namespace: str, account_id: str) -> None:
         """admin 把命名空间转给另一个作者。保留历史提交与审计，不改写。"""
         with self._lock:
-            admin = self._require(token, {"admin"})
+            admin = self._require(token, ADMIN_ROLES)
             namespace = str(namespace or "").strip()
             if not re.fullmatch(r"[a-z][a-z0-9]*", namespace):
                 raise StoreError("ID_FORMAT", "命名空间只能用小写字母和数字，且以字母开头")
             target = self._account_row(account_id)
             if target["disabled_at"]:
                 raise StoreError("ACCOUNT_DISABLED", "这个用户已停用。")
-            if target["role"] not in {"publisher", "admin"}:
-                raise StoreError("ROLE_FORBIDDEN", "只能转给作者或审核。")
+            if target["role"] not in PUBLISHER_ROLES:
+                raise StoreError("ROLE_FORBIDDEN", "只能转给作者、审核或管理员。")
             owner = self._namespace_owner(namespace, persist=True)
             if owner is None:
                 raise StoreError("VERSION_UNAVAILABLE", "没有这个命名空间")

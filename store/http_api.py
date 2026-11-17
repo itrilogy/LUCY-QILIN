@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import hmac
 import json
 import os
@@ -13,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from store.diagnostics import auth_failure, internal as log_internal
 from store.mcp_api import handle
@@ -30,9 +31,10 @@ _MAX_BODY = (_MAX_BYTES // 3 + 1) * 4 + 1024 * 1024
 class _RateLimiter:
     """单进程滑动窗口限流。多进程/反代后要配 fail2ban 或在网关再做一层。"""
 
-    def __init__(self, limit: int, window: float) -> None:
+    def __init__(self, limit: int, window: float, max_keys: int = 4096) -> None:
         self.limit = max(1, int(limit))
         self.window = float(window)
+        self.max_keys = max(64, int(max_keys))
         self._events: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
@@ -40,6 +42,12 @@ class _RateLimiter:
         moment = time.monotonic() if now is None else now
         with self._lock:
             cutoff = moment - self.window
+            if len(self._events) >= self.max_keys and key not in self._events:
+                stale = [k for k, vals in self._events.items() if not vals or vals[-1] <= cutoff]
+                for k in stale:
+                    self._events.pop(k, None)
+                if len(self._events) >= self.max_keys:
+                    self._events.clear()
             events = [item for item in self._events.get(key, []) if item > cutoff]
             if len(events) >= self.limit:
                 self._events[key] = events
@@ -89,9 +97,20 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             super().setup()
             self.connection.settimeout(30)
 
-        def _limit(self, bucket: str) -> None:
+        def _client_ip(self) -> str:
+            if getattr(self.server, "trust_proxy", False):
+                real_ip = (self.headers.get("X-Real-IP") or "").strip()
+                if real_ip and len(real_ip) <= 64:
+                    return real_ip
+                forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+                if forwarded and len(forwarded) <= 64:
+                    return forwarded
+            return self.client_address[0]
+
+        def _limit(self, bucket: str, subject: str = "") -> None:
             limiter = self.server.limiters[bucket]
-            if not limiter.allow(self.client_address[0]):
+            key = f"{self._client_ip()}:{subject}" if subject else self._client_ip()
+            if not limiter.allow(key):
                 raise StoreError("RATE_LIMITED", "请求过于频繁，请稍后再试。")
 
         def do_GET(self) -> None:
@@ -301,12 +320,13 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     self._send(200, _issued(profile, key, _base(self)), _session_cookie(session, secure=_secure(self)))
                     return
                 if path == "/v1/login":
-                    self._limit("login")
+                    username = str(body.get("username") or "").strip().lower()
+                    self._limit("login", username)
                     profile, session = store.login_account(
                         str(body.get("username") or ""),
                         str(body.get("password") or ""),
                     )
-                    self.server.limiters["login"].reset(self.client_address[0])
+                    self.server.limiters["login"].reset(f"{self._client_ip()}:{username}")
                     self._send(200, profile, _session_cookie(session, secure=_secure(self)))
                     return
                 if path == "/v1/logout":
@@ -550,9 +570,15 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                 self._send(404, {"rule": "VERSION_UNAVAILABLE", "message": "没有这个文件"})
                 return
             payload = path.read_bytes()
+            etag = '"' + hashlib.sha256(payload).hexdigest()[:16] + '"'
+            if self.headers.get("If-None-Match") == etag:
+                self._empty(304, [("ETag", etag), ("Cache-Control", "no-cache")])
+                return
             self.send_response(200)
             self.send_header("Content-Type", TYPES.get(path.suffix, "application/octet-stream"))
             self.send_header("Content-Length", str(len(payload)))
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
@@ -576,6 +602,7 @@ def serve(
     port: int = 0,
     public_base: str = "",
     hub_authorize: str = "",
+    trust_proxy: bool = False,
     login_limit: int = 20,
     login_window: float = 300,
     register_limit: int = 10,
@@ -594,6 +621,7 @@ def serve(
     server = _Server((host, port), make_handler(store))
     server.public_base = public_base.strip()  # type: ignore[attr-defined]
     server.hub_authorize = hub_authorize.strip()  # type: ignore[attr-defined]
+    server.trust_proxy = bool(trust_proxy)  # type: ignore[attr-defined]
     server.limiters = {  # type: ignore[attr-defined]
         "login": _RateLimiter(login_limit, login_window),
         "register": _RateLimiter(register_limit, register_window),

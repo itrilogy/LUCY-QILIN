@@ -176,7 +176,7 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["submission_id", "reason"],
     },
     "list_contributions": {
-        "description": "发布贡献排行/明细。只给 admin；不传 account_id 返回按产品数排序的贡献者，传 account_id 返回该人的已发布产品明细。",
+        "description": "发布贡献排行/明细。审核/管理员可读；不传 account_id 返回按产品数排序的贡献者，传 account_id 返回该人的已发布产品明细。",
         "properties": {
             "account_id": {"type": "string", "description": "只看某个账号的贡献明细。"},
             "limit": {"type": "integer", "description": "最多返回几条，默认 100。"},
