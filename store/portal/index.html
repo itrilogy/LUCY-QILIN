@@ -220,16 +220,25 @@
         <section id="connect" class="view">
           <h1>连接</h1>
           <p class="lead">在 AI 工具中连接本商店的 MCP 服务后，方可浏览、下载和使用已发布产品。上架规范由该 MCP 的 get_spec 下发，不写在技能正文里。使用说明以本页配置为准。</p>
-          <p class="state" id="connect-anon">先登录。创建账号时会生成那把 KEY，并带到这一页。</p>
+          <p class="state" id="connect-anon">未登录也可以复制只读配置。发布配置需要先登录并持有 KEY。</p>
+          <div class="group" id="connect-tabs">
+            <h2>选择接入方式</h2>
+            <p class="foot">只读不需要 KEY；发布/审核用管理配置。同一个客户端只装一个：发布配置已经包含只读工具。两个配置的 serverName 固定不同，避免重复接入。</p>
+            <div class="chips" id="connect-tab-buttons" role="tablist" aria-label="连接配置">
+              <button type="button" role="tab" data-tab="dsh-read" aria-selected="true" aria-controls="connect-tab-body">DSH · 只读</button>
+              <button type="button" role="tab" data-tab="dsh-publish" aria-selected="false" aria-controls="connect-tab-body">DSH · 发布</button>
+              <button type="button" role="tab" data-tab="generic-read" aria-selected="false" aria-controls="connect-tab-body">通用 · 只读</button>
+              <button type="button" role="tab" data-tab="generic-publish" aria-selected="false" aria-controls="connect-tab-body">通用 · 发布</button>
+            </div>
+            <p class="foot" id="connect-tab-note"></p>
+            <pre id="connect-tab-body" class="diff" role="tabpanel" aria-live="polite"></pre>
+            <div class="row"><button type="button" class="btn primary" id="copy-tab">复制这一段</button></div>
+            <p class="state" id="copy-tab-state"></p>
+          </div>
           <div class="group hidden" id="connect-secret">
             <h2>这一把 KEY</h2>
-            <p class="foot">只出现这一次。离开之后明文不再显示。作者的 KEY 和审核的 KEY 不要装进同一个 AI 工具。</p>
+            <p class="foot">只出现这一次。离开之后明文不再显示。发布配置里的 KEY 由你自己填入；只读配置不需要它。</p>
             <pre id="connect-key" class="diff"></pre>
-            <h2>交给 AI 工具</h2>
-            <p class="foot">商店 MCP。把整段配置贴进 AI 工具的 MCP 设置。交目录前先让工具调用 get_spec。钥匙放进环境变量 QILIN_STORE_KEY，不要写进命令，也不要写进笔记。</p>
-            <pre id="connect-snippet" class="diff"></pre>
-            <div class="row"><button type="button" class="btn primary" id="copy-snippet">复制配置</button></div>
-            <p class="state" id="copy-state"></p>
           </div>
           <div class="group hidden" id="connect-later">
             <h2>已经生成</h2>

@@ -104,8 +104,8 @@ def main() -> int:
 
             # 匿名货架：插件分类与 URL 状态
             page.click('#kind-chips button[data-kind="plugin"]')
+            page.wait_for_url(re.compile(r"#shelf\?kind=plugin"))
             page.wait_for_selector("#shelf-grid .card")
-            assert "kind=plugin" in page.url, page.url
             assert page.locator("#kind-chips button[data-kind='plugin']").get_attribute("aria-pressed") == "true"
             page.reload(wait_until="networkidle")
             page.wait_for_selector("#shelf-grid .card")
@@ -124,12 +124,26 @@ def main() -> int:
             assert len(columns.split()) == 1, columns
             page.set_viewport_size({"width": 1280, "height": 900})
 
+            # 连接页：匿名只读、发布配置需要登录
+            page.click('.nav button[data-view="connect"]')
+            page.wait_for_selector("#connect-tab-body")
+            assert "qilin-store" in page.locator("#connect-tab-body").inner_text()
+            assert page.locator('#connect-tab-buttons button[data-tab="dsh-publish"]').is_disabled()
+            page.click('#connect-tab-buttons button[data-tab="generic-read"]')
+            assert "qilin-store" in page.locator("#connect-tab-body").inner_text()
+            page.click('.nav button[data-view="shelf"]')
+
             # 登录 reviewer，检查插件表单
             page.click("#login-open")
             page.fill("#login-username", REVIEWER["username"])
             page.fill("#login-password", REVIEWER["password"])
             page.click("#login-submit")
             page.locator("#who").filter(has_text="审核").wait_for()
+            page.click('.nav button[data-view="connect"]')
+            page.click('#connect-tab-buttons button[data-tab="dsh-publish"]')
+            assert "qilin-publish" in page.locator("#connect-tab-body").inner_text()
+            assert "QILIN_STORE_KEY" in page.locator("#connect-tab-body").inner_text()
+            page.click('.nav button[data-view="shelf"]')
             page.click("#new-product")
             page.select_option("#f-kind", "plugin")
             assert page.locator("#plugin-fields").is_visible()

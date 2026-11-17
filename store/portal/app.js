@@ -13,7 +13,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       no_secrets: "包内没有密钥、隐私数据或未声明上传",
       dsh_range_checked: "DSH 版本范围与目标版本相符",
     };
-    const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", shelfSort: "updated", shelfOffset: 0, shelfTotal: 0, issued: null };
+    const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", shelfSort: "updated", shelfOffset: 0, shelfTotal: 0, issued: null, connectTab: "dsh-read" };
 
     function show(id) {
       document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === id));
@@ -1568,13 +1568,20 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       });
     }
 
-    document.getElementById("copy-snippet").addEventListener("click", async () => {
-      const snippet = document.getElementById("connect-snippet").textContent;
+    document.getElementById("connect-tab-buttons").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-tab]");
+      if (!button || button.disabled) return;
+      state.connectTab = button.dataset.tab;
+      renderConnect();
+    });
+
+    document.getElementById("copy-tab").addEventListener("click", async () => {
+      const snippet = document.getElementById("connect-tab-body").textContent;
       try {
         await navigator.clipboard.writeText(snippet);
-        setState("copy-state", "已复制。贴进 AI 工具的 MCP 设置。", false);
+        setState("copy-tab-state", "已复制。贴进 AI 工具的 MCP 设置。", false);
       } catch {
-        setState("copy-state", "复制没成功。请从上面的配置里手动复制。", true);
+        setState("copy-tab-state", "复制没成功。请从上面的配置里手动复制。", true);
       }
     });
 
@@ -1590,26 +1597,74 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       }
     });
 
+    function connectBase() {
+      return (state.mcpUrl || (location.origin + "/mcp")).replace(/\/$/, "");
+    }
+
+    function connectConfig(tab) {
+      const url = connectBase();
+      if (tab === "dsh-read") {
+        return [
+          "- id: mcp-qilin-store",
+          "  name: '@deepseek-ai/dsh-mcp-client'",
+          "  config:",
+          "    serverName: qilin-store",
+          "    transport: streamable-http",
+          `    url: ${url}`,
+          "    failOnStartupError: false",
+        ].join("\n");
+      }
+      if (tab === "dsh-publish") {
+        return [
+          "- id: mcp-qilin-publish",
+          "  name: '@deepseek-ai/dsh-mcp-client'",
+          "  config:",
+          "    serverName: qilin-publish",
+          "    transport: streamable-http",
+          `    url: ${url}`,
+          "    expandTemplates: true",
+          "    headers:",
+          "      Authorization: !!js '`Bearer ${process.env.QILIN_STORE_KEY}`'",
+          "    failOnStartupError: false",
+        ].join("\n");
+      }
+      const publish = tab === "generic-publish";
+      const name = publish ? "qilin-publish" : "qilin-store";
+      const server = { type: "http", url };
+      if (publish) server.headers = { Authorization: "Bearer <你的 KEY>" };
+      return JSON.stringify({ mcpServers: { [name]: server } }, null, 2);
+    }
+
+    function renderConnectTabs(signed) {
+      const notes = {
+        "dsh-read": "DSH 只读：不需要 KEY。serverName=qilin-store。",
+        "dsh-publish": "DSH 发布：需要 KEY。serverName=qilin-publish；先把 KEY 放进 QILIN_STORE_KEY。",
+        "generic-read": "通用只读：不需要 KEY。name=qilin-store。",
+        "generic-publish": "通用发布：需要 KEY。name=qilin-publish；把 <你的 KEY> 换成这一页显示的 KEY。",
+      };
+      if (!signed && state.connectTab.endsWith("publish")) state.connectTab = "dsh-read";
+      document.querySelectorAll("#connect-tab-buttons button[data-tab]").forEach((button) => {
+        const publish = button.dataset.tab.endsWith("publish");
+        button.disabled = publish && !signed;
+        button.setAttribute("aria-selected", button.dataset.tab === state.connectTab ? "true" : "false");
+      });
+      document.getElementById("connect-tab-body").textContent = connectConfig(state.connectTab);
+      document.getElementById("connect-tab-note").textContent =
+        (notes[state.connectTab] || "") + " 同一客户端只装一个；发布配置已包含只读工具。";
+    }
+
     function renderConnect() {
       const signed = signedIn();
       document.getElementById("connect-anon").classList.toggle("hidden", signed);
       const secret = document.getElementById("connect-secret");
       const later = document.getElementById("connect-later");
-      if (!signed) {
-        secret.classList.add("hidden");
-        later.classList.add("hidden");
-        return;
-      }
-      if (state.issued && state.issued.key) {
-        secret.classList.remove("hidden");
-        later.classList.add("hidden");
+      secret.classList.toggle("hidden", !signed || !(state.issued && state.issued.key));
+      if (signed && state.issued && state.issued.key) {
         document.getElementById("connect-key").textContent = state.issued.key;
-        document.getElementById("connect-snippet").textContent = JSON.stringify(state.issued.mcp, null, 2);
-        return;
       }
-      secret.classList.add("hidden");
-      later.classList.remove("hidden");
-      document.getElementById("connect-url").textContent = state.mcpUrl || "";
+      later.classList.toggle("hidden", !signed || Boolean(state.issued && state.issued.key));
+      if (signed) document.getElementById("connect-url").textContent = state.mcpUrl || "";
+      renderConnectTabs(signed);
     }
 
     function clearReset() {
