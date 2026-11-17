@@ -193,6 +193,12 @@ class PluginServiceTests(unittest.TestCase):
         self._review(self.other_admin, result.submission_id)
         self.store.approve(self.other_admin, result.submission_id)
 
+    def test_get_review_exposes_the_recorded_checklist(self) -> None:
+        result = self._submit()
+        self._review(self.admin, result.submission_id)
+        sheet = self.store.get_review(self.admin, result.submission_id)
+        self.assertEqual(sheet["plugin_review"]["checklist"], {item: True for item in PLUGIN_REVIEW_ITEMS})
+
     def test_plugin_cannot_be_published_without_review(self) -> None:
         result = self._submit()
         with self.assertRaises(StoreError) as caught:

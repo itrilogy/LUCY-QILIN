@@ -421,6 +421,16 @@ class CatalogMixin:
             if base_row is not None and base_row["artifact_path"] and Path(base_row["artifact_path"]).is_file():
                 _, base_texts = _read_archive_preview(Path(base_row["artifact_path"]))
             sheet = self._sheet(row)
+            review = self._db.execute(
+                "SELECT checklist_json, reviewer_id, created_at FROM plugin_reviews WHERE submission_id = ?",
+                (submission_id,),
+            ).fetchone()
+            if review is not None:
+                sheet["plugin_review"] = {
+                    "checklist": json.loads(review["checklist_json"]),
+                    "reviewer_id": review["reviewer_id"],
+                    "created_at": review["created_at"],
+                }
             sheet["files"] = names
             sheet["files_preview"] = current_texts
             sheet["file_diffs"] = _compute_file_diffs(

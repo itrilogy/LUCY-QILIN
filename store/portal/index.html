@@ -211,6 +211,8 @@
     .diff-del { color: var(--text-danger); }
     .diff-hunk { color: var(--text-muted); }
     .file-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+    .check-row { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; font-size: 13px; }
+    .check-row input { width: auto; height: auto; margin-top: 3px; }
     @media (max-width: 900px) {
       .shell { grid-template-columns: 1fr; }
       .nav {
@@ -488,6 +490,7 @@
                 <option value="mcp+skill">技能和 MCP</option>
                 <option value="runtime">运行时</option>
                 <option value="knowledge">知识包</option>
+                <option value="plugin">插件</option>
               </select>
               <label for="f-submit-kind">提交方式 <span class="name">submit_kind</span></label>
               <select id="f-submit-kind" name="submit_kind">
@@ -515,6 +518,36 @@
               <input id="f-platforms" name="platforms" placeholder="any 或 darwin-arm64,windows-amd64" aria-required="true" />
               <label for="f-clients">AI 工具 <span class="name">clients</span> <abbr class="req">必填</abbr></label>
               <input id="f-clients" name="clients" placeholder="reasonix" aria-required="true" />
+            </div>
+            <div class="group hidden" id="plugin-fields">
+              <h2>插件</h2>
+              <p class="foot">插件是 DSH 的 Host/Client 代码，不是配置式 MCP。Tier A 零 npm 运行时依赖；Tier B 只收 admin/白名单作者；Tier C 当前不接受。</p>
+              <label for="f-plugin-tier">分级 <span class="name">plugin.tier</span></label>
+              <select id="f-plugin-tier" name="plugin.tier">
+                <option value="A">A · 零运行时依赖</option>
+                <option value="B">B · 白名单纯 JS 依赖</option>
+              </select>
+              <label for="f-plugin-form">形态 <span class="name">plugin.form</span></label>
+              <select id="f-plugin-form" name="plugin.form">
+                <option value="both">both · Host + Client</option>
+                <option value="host">host</option>
+                <option value="client">client</option>
+              </select>
+              <label for="f-plugin-entry">Host 入口 <span class="name">plugin.entry</span></label>
+              <input id="f-plugin-entry" name="plugin.entry" placeholder="index.js" />
+              <label for="f-plugin-client">Client 入口 <span class="name">plugin.client</span></label>
+              <input id="f-plugin-client" name="plugin.client" placeholder="client.js" />
+              <label for="f-plugin-patch">补丁文件 <span class="name">plugin.patch</span></label>
+              <input id="f-plugin-patch" name="plugin.patch" value="cordis.patch.yml" />
+              <label for="f-plugin-dsh">DSH 版本范围 <span class="name">plugin.dsh</span></label>
+              <input id="f-plugin-dsh" name="plugin.dsh" value=">=1.5 <2" />
+              <label for="f-plugin-files">文件白名单 <span class="name">plugin.files</span></label>
+              <input id="f-plugin-files" name="plugin.files" placeholder="package.json,index.js,client.js,cordis.patch.yml" />
+              <label for="f-plugin-caps">能力声明 <span class="name">plugin.capabilities</span></label>
+              <input id="f-plugin-caps" name="plugin.capabilities" placeholder="tools,client-slots" />
+              <label for="f-plugin-external">外部命令 <span class="name">plugin.external</span></label>
+              <input id="f-plugin-external" name="plugin.external" placeholder="rg,pandoc；写了要加 process:spawn" />
+              <p class="foot">插件目录根上必须有 package.json；manifest.json 只用于填表，不随制品提交。Tier A/B 的平台只能是 any，客户端只能是 deepseek-harness。</p>
             </div>
             <div class="group" id="invoke-group">
               <h2>调用</h2>
@@ -602,6 +635,11 @@
                 </div>
                 <p class="foot" id="skill-dir-note">清单会填进表单，不随制品提交。系统尾巴文件不提交。</p>
               </div>
+              <div id="plugin-file" class="hidden">
+                <label class="btn" for="f-plugin-dir">选择插件目录</label>
+                <input id="f-plugin-dir" type="file" webkitdirectory multiple />
+                <p class="foot" id="plugin-dir-note">读取目录根与子目录里的运行文件；manifest.json 只填表，不随制品提交。</p>
+              </div>
               <div id="runtime-file" class="hidden">
                 <label for="f-runtime-file">这个平台的文件</label>
                 <input id="f-runtime-file" name="runtime.file" type="file" />
@@ -674,6 +712,16 @@
     const ROLE_LABEL = { admin: "审核", publisher: "作者", member: "未授权" };
     const SECURITY_LABEL = { public: "公开", internal: "内部", restricted: "受限", confidential: "机密" };
     const SCOPE_LABEL = { enterprise: "企业", work: "工作产出" };
+    const PLUGIN_REVIEW_LABELS = {
+      source_readable: "源码可读，没有混淆/压缩到不可读",
+      no_install_scripts: "没有 install / postinstall 等生命周期脚本",
+      dependencies_reviewed: "依赖已核对，符合 Tier 与白名单",
+      capabilities_checked: "capabilities 声明与实际代码一致",
+      external_commands_checked: "外部命令已核对，且声明了 process:spawn",
+      lifecycle_cleanup: "注册与监听有清理，不写 DOM / 应用根",
+      no_secrets: "包内没有密钥、隐私数据或未声明上传",
+      dsh_range_checked: "DSH 版本范围与目标版本相符",
+    };
     const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", issued: null };
 
     function show(id) {
@@ -1144,6 +1192,7 @@
 
     let skillExtras = {};
     let noteFiles = null;
+    let pluginFiles = null;
     let readingFiles = false;
 
     function openForm(mode, submissionId, manifest) {
@@ -1170,6 +1219,7 @@
     function fillForm(manifest, mode) {
       const form = document.getElementById("sheet");
       form.reset();
+      pluginFiles = null;
       const source = manifest || {};
       document.getElementById("f-id").value = source.id || "";
       document.getElementById("f-version").value = mode === "new_version" ? "" : (source.version || "");
@@ -1191,6 +1241,16 @@
       if (invoke.form === "list_tools" || invoke.form === "documented") {
         document.getElementById("f-invoke").value = invoke.form;
       }
+      const plugin = source.plugin || {};
+      document.getElementById("f-plugin-tier").value = plugin.tier || "A";
+      document.getElementById("f-plugin-form").value = plugin.form || "both";
+      document.getElementById("f-plugin-entry").value = plugin.entry || "index.js";
+      document.getElementById("f-plugin-client").value = plugin.client || "client.js";
+      document.getElementById("f-plugin-patch").value = plugin.patch || "cordis.patch.yml";
+      document.getElementById("f-plugin-dsh").value = plugin.dsh || ">=1.5 <2";
+      document.getElementById("f-plugin-files").value = (plugin.files || []).join(",");
+      document.getElementById("f-plugin-caps").value = (plugin.capabilities || []).join(",");
+      document.getElementById("f-plugin-external").value = (plugin.external || []).join(",");
       document.getElementById("f-bin").value = (source.runtime || {}).bin_name || "";
       const depends = source.depends || {};
       document.getElementById("f-store").value = lines(depends.store);
@@ -1221,18 +1281,22 @@
       const mcp = kind === "mcp" || kind === "mcp+skill";
       const runtime = kind === "runtime";
       const knowledge = kind === "knowledge";
+      const plugin = kind === "plugin";
       const invokeNotes = {
         skill: "这是一份技能，从 SKILL.md 读起。不用填连接地址。",
         mcp: "远程服务只填地址，本机服务只填命令和参数。没有要交的文件。",
         "mcp+skill": "先填怎么连接，再交 SKILL.md。",
         runtime: "这是要随版本发布的命令文件，按平台各交一份。",
         knowledge: "这是一组笔记。从入口那一篇读起，链接只能指向包里的篇名。",
+        plugin: "这是 DSH 插件。填清单字段并选插件目录；package.json 必须在根上。",
       };
       document.getElementById("invoke-note").textContent = invokeNotes[kind];
       document.getElementById("knowledge-fields").classList.toggle("hidden", !knowledge);
       document.getElementById("mcp-fields").classList.toggle("hidden", !mcp);
       document.getElementById("mcp-invoke").classList.toggle("hidden", kind !== "mcp");
       document.getElementById("runtime-fields").classList.toggle("hidden", !runtime);
+      document.getElementById("plugin-fields").classList.toggle("hidden", !plugin);
+      document.getElementById("plugin-file").classList.toggle("hidden", !plugin);
       document.getElementById("skill-invoke").classList.toggle("hidden", !skill);
       document.getElementById("skill-invoke").textContent = kind === "mcp+skill"
         ? "先读 SKILL.md，再连接 MCP。"
@@ -1240,9 +1304,15 @@
       document.getElementById("skill-file").classList.toggle("hidden", !skill);
       document.getElementById("knowledge-file").classList.toggle("hidden", !knowledge);
       document.getElementById("runtime-file").classList.toggle("hidden", !runtime);
-      document.getElementById("depends-group").classList.toggle("hidden", knowledge);
+      document.getElementById("depends-group").classList.toggle("hidden", knowledge || plugin);
       document.getElementById("secrets-group").classList.toggle("hidden", knowledge);
-      document.getElementById("artifact-group").classList.toggle("hidden", !skill && !runtime && !knowledge);
+      document.getElementById("artifact-group").classList.toggle("hidden", !skill && !runtime && !knowledge && !plugin);
+      if (plugin) {
+        const platforms = document.getElementById("f-platforms");
+        const clients = document.getElementById("f-clients");
+        platforms.value = "any";
+        clients.value = "deepseek-harness";
+      }
       const submitKind = document.getElementById("f-submit-kind");
       submitKind.querySelector('option[value="add_platform"]').hidden = !runtime;
       if (!runtime && submitKind.value === "add_platform" && !submitKind.disabled) {
@@ -1269,6 +1339,9 @@
     });
     document.getElementById("f-notes").addEventListener("change", (event) => {
       ingestNoteFiles(event.target.files);
+    });
+    document.getElementById("f-plugin-dir").addEventListener("change", (event) => {
+      ingestPluginFiles(event.target.files);
     });
 
     function isIgnoredClientPath(rel) {
@@ -1307,6 +1380,16 @@
       if (Array.isArray(data.platforms)) set("f-platforms", data.platforms.join(","));
       if (Array.isArray(data.clients)) set("f-clients", data.clients.join(","));
       if (data.author && data.author.display_name) set("f-author", data.author.display_name);
+      const plugin = data.plugin || {};
+      set("f-plugin-tier", plugin.tier);
+      set("f-plugin-form", plugin.form);
+      set("f-plugin-entry", plugin.entry);
+      set("f-plugin-client", plugin.client);
+      set("f-plugin-patch", plugin.patch);
+      set("f-plugin-dsh", plugin.dsh);
+      if (Array.isArray(plugin.files)) set("f-plugin-files", plugin.files.join(","));
+      if (Array.isArray(plugin.capabilities)) set("f-plugin-caps", plugin.capabilities.join(","));
+      if (Array.isArray(plugin.external)) set("f-plugin-external", plugin.external.join(","));
       const kind = document.getElementById("f-kind");
       if (data.kind && kind && !kind.disabled && kind.querySelector(`option[value="${data.kind}"]`)) {
         kind.value = data.kind;
@@ -1367,6 +1450,33 @@
       }
     }
 
+    async function ingestPluginFiles(fileList) {
+      readingFiles = true;
+      const incoming = {};
+      let manifestData = null;
+      try {
+        for (const file of fileList) {
+          const rel = relativeFromPicker(file);
+          if (!rel || isIgnoredClientPath(rel)) continue;
+          if (rel === "manifest.json") {
+            try { manifestData = JSON.parse(await file.text()); } catch { /* 只填表 */ }
+            continue;
+          }
+          incoming[rel] = await b64(await file.arrayBuffer());
+        }
+        pluginFiles = incoming;
+        const names = Object.keys(incoming).sort();
+        const filesInput = document.getElementById("f-plugin-files");
+        if (names.length && !filesInput.value.trim()) filesInput.value = names.join(",");
+        document.getElementById("plugin-dir-note").textContent = names.length
+          ? `已读入 ${names.length} 个文件。根上必须有 package.json；manifest.json 只填表，不随制品提交。`
+          : "还没有读入插件文件。根上必须有 package.json。";
+        if (manifestData) fillFromManifest(manifestData);
+      } finally {
+        readingFiles = false;
+      }
+    }
+
     function splitList(value) {
       return value.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
     }
@@ -1416,6 +1526,29 @@
           return { name, description: rest.join(" ") };
         }),
       };
+      if (kind === "plugin") {
+        const files = pluginFiles || {};
+        if (!files["package.json"]) throw new Error("插件目录根上要有 package.json。请先选择插件目录。");
+        const form = document.getElementById("f-plugin-form").value;
+        const plugin = {
+          tier: document.getElementById("f-plugin-tier").value,
+          form,
+          entry: document.getElementById("f-plugin-entry").value.trim() || undefined,
+          client: document.getElementById("f-plugin-client").value.trim() || undefined,
+          patch: document.getElementById("f-plugin-patch").value.trim() || "cordis.patch.yml",
+          files: splitList(document.getElementById("f-plugin-files").value),
+          dsh: document.getElementById("f-plugin-dsh").value.trim(),
+          capabilities: splitList(document.getElementById("f-plugin-caps").value),
+          external: splitList(document.getElementById("f-plugin-external").value),
+        };
+        if (!plugin.files.length) plugin.files = Object.keys(files).sort();
+        if (!plugin.entry) delete plugin.entry;
+        if (!plugin.client) delete plugin.client;
+        manifest.plugin = plugin;
+        manifest.invoke = { form: "install_plugin" };
+        Object.assign(files, pluginFiles);
+        return { manifest, files };
+      }
       const extName = document.getElementById("f-ext-name").value.trim();
       if (extName) {
         manifest.depends.external.push({
@@ -1511,7 +1644,7 @@
       button.disabled = true;
       error.hidden = true;
       rules.replaceChildren();
-      const missing = firstEmpty([
+      let missing = firstEmpty([
         ["f-id", "id"],
         ["f-version", "version"],
         ["f-author", "author.display_name"],
@@ -1522,6 +1655,9 @@
         ["f-platforms", "platforms"],
         ["f-clients", "clients"],
       ]);
+      if (!missing && document.getElementById("f-kind").value === "plugin") {
+        missing = firstEmpty([["f-plugin-patch", "plugin.patch"], ["f-plugin-dsh", "plugin.dsh"]]);
+      }
       if (missing) {
         button.disabled = false;
         error.hidden = false;
@@ -1690,10 +1826,62 @@
         diff.append(text("h2", "与上一版"));
         if (!(sheetData.diff || []).length) diff.append(text("p", "无已发布版本。", "diff"));
         else diff.append(text("pre", (sheetData.diff || []).map((item) => `${item.path}\n- ${JSON.stringify(item.before)}\n+ ${JSON.stringify(item.after)}`).join("\n\n"), "diff"));
+        let reviewReady = true;
+        let publishButton = null;
+        let pluginReviewGroup = null;
+        if (sheetData.manifest.kind === "plugin") {
+          reviewReady = Boolean(sheetData.plugin_review);
+          pluginReviewGroup = document.createElement("div");
+          pluginReviewGroup.className = "group";
+          pluginReviewGroup.append(text("h2", "插件审核清单"));
+          pluginReviewGroup.append(text("p", "逐项确认后才能发布。记录会保存审核人与制品 sha256；修订后要重新审。", "foot"));
+          const existing = (sheetData.plugin_review || {}).checklist || {};
+          const boxes = {};
+          Object.entries(PLUGIN_REVIEW_LABELS).forEach(([key, label]) => {
+            const row = document.createElement("label");
+            row.className = "check-row";
+            const box = document.createElement("input");
+            box.type = "checkbox";
+            box.checked = Boolean(existing[key]);
+            box.dataset.item = key;
+            boxes[key] = box;
+            row.append(box, document.createTextNode(label));
+            pluginReviewGroup.append(row);
+          });
+          const reviewState = text("p", "", "foot");
+          if (sheetData.plugin_review) {
+            reviewState.textContent = "已记录审核清单，可以发布；如重新记录会覆盖。";
+          }
+          const record = text("button", "记录审核", "btn primary");
+          record.type = "button";
+          record.addEventListener("click", async () => {
+            record.disabled = true;
+            reviewState.textContent = "";
+            const checklist = {};
+            Object.entries(boxes).forEach(([key, box]) => { if (box.checked) checklist[key] = true; });
+            try {
+              await api(`/v1/submissions/${submissionId}/plugin-review`, {
+                method: "POST",
+                body: JSON.stringify({ checklist }),
+              });
+              reviewReady = true;
+              reviewState.textContent = "已记录审核清单，可以发布。";
+              if (publishButton) publishButton.disabled = false;
+            } catch (error) {
+              reviewState.textContent = (error.rule ? error.rule + " " : "") + error.message;
+              reviewState.classList.add("error");
+            } finally {
+              record.disabled = false;
+            }
+          });
+          pluginReviewGroup.append(record, reviewState);
+        }
         const actions = document.createElement("div");
         actions.className = "row";
         const publish = text("button", "发布", "btn primary");
         publish.type = "button";
+        publish.disabled = !reviewReady;
+        publishButton = publish;
         const reject = text("button", "退回", "btn danger");
         reject.type = "button";
         const reason = document.createElement("textarea");
@@ -1730,7 +1918,9 @@
           }
         });
         actions.append(publish, reject);
-        detail.append(checks, diff, actions, text("label", "退回原因"), reason, note);
+        detail.append(checks);
+        if (pluginReviewGroup) detail.append(pluginReviewGroup);
+        detail.append(diff, actions, text("label", "退回原因"), reason, note);
         const files = document.createElement("div");
         files.className = "group";
         files.append(text("h2", "制品"));
