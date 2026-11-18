@@ -48,8 +48,11 @@ class ReviseUploadTests(unittest.TestCase):
             self.publisher, original.submission_id, self._revised_manifest(), byte_size=len(payload)
         )
         self.assertEqual(started["status"], "uploading")
-        self.assertEqual(started["put_path"], f"/v1/uploads/revise/{original.submission_id}")
-        self.store.save_revise_upload(self.publisher, original.submission_id, payload)
+        prefix = f"/v1/uploads/revise/{original.submission_id}?ticket="
+        self.assertTrue(started["put_path"].startswith(prefix))
+        ticket = started["put_path"][len(prefix):]
+        # 只凭 ticket 上传，模拟独立终端没有 Authorization。
+        self.store.save_revise_upload("", original.submission_id, payload, ticket=ticket)
         result = self.store.finish_revise(self.publisher, original.submission_id)
         self.assertEqual(result.submission_id, original.submission_id)
         self.assertEqual(result.status, "pending")

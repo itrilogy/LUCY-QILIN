@@ -532,9 +532,9 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | 工具 | 作用 |
 |---|---|
 | `validate` | 只传 `manifest.json`。不入库。返回 `ok`、`rules` 和 `findings`（`rule`、`path`、`message`、`severity`）。还有 error 就改包再调，不要上传 |
-| `begin_submit` | 参数：`submit_kind`（`new_version` 或 `add_platform`）、清单文本、制品字节数、本次涉及的 `platforms`。`add_platform` 还要传已发布的 `version`。通过静态校验后返回 `submission_id` 和一次性 PUT 地址。大文件不进工具参数 |
+| `begin_submit` | 参数：`submit_kind`（`new_version` 或 `add_platform`）、清单文本、制品字节数、本次涉及的 `platforms`。`add_platform` 还要传已发布的 `version`。通过静态校验后返回 `submission_id` 和带一次性 `ticket` 的 PUT 地址。大文件不进工具参数 |
 | `finish_submit` | 参数：`submission_id`。应用核对校验和、扫密钥、请求外部依赖 URL。通过则状态变为 `pending`。只有地址当时打不开时仍是 `uploading`，带 `DEP_EXTERNAL_UNREACHABLE`，可以再调一次。其他失败为 `rejected` 并带规则 id，不进入审核队列 |
-| `begin_revise` | 参数：`submission_id`、清单、制品字节数。只对待审核或已退回的提交；静态校验通过后返回一次性 PUT 地址。修订不新开提交，保持同一个 `submission_id` |
+| `begin_revise` | 参数：`submission_id`、清单、制品字节数。只对待审核或已退回的提交；静态校验通过后返回带一次性 `ticket` 的 PUT 地址。修订不新开提交，保持同一个 `submission_id` |
 | `finish_revise` | 参数：`submission_id`。核对修订制品并按原单替换；通过回到 `pending`，不通过回到 `rejected` |
 | `list_my_submissions` | 自己的提交和状态、退回原因 |
 | `get_submission` | 自己的某一条，含校验报告 |
@@ -593,7 +593,7 @@ AI 工具侧约定这样做，模型不自己编造 curl，也不把步骤抄进
 
 修订一条 `pending` 或 `rejected` 的提交走另一条三段：`begin_revise`（静态校验、拿 PUT 地址）→ PUT 到 `/v1/uploads/revise/<submission_id>` → `finish_revise`。不要复用 `begin_submit`，否则会新开一条让审核员对不上。
 
-PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果里不包含用户密钥。
+PUT 地址一次性、短时有效、只能写这一份制品；URL 里的 `ticket` 是短期能力票据，不是用户 KEY。独立终端不需要继承 MCP 的 `Authorization`，也不需要设置 `QILIN_STORE_KEY`；ticket 用一次即失效。MCP 工具结果里不包含用户密钥。
 
 ### 5.3 审核时序
 

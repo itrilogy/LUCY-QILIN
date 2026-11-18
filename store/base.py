@@ -116,6 +116,14 @@ class StoreBase:
               artifact_path TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS upload_tickets (
+              token_hash TEXT PRIMARY KEY,
+              submission_id TEXT NOT NULL,
+              account_id TEXT NOT NULL,
+              scope TEXT NOT NULL,
+              expires_at INTEGER NOT NULL,
+              used_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS catalog_index (
               package_id TEXT PRIMARY KEY,
               version TEXT NOT NULL,
@@ -192,6 +200,7 @@ class StoreBase:
             CREATE INDEX IF NOT EXISTS releases_visible ON releases (unpublished_at, package_id);
             CREATE INDEX IF NOT EXISTS submissions_status ON submissions (status, package_id);
             CREATE INDEX IF NOT EXISTS submissions_publisher ON submissions (publisher_id);
+            CREATE INDEX IF NOT EXISTS upload_tickets_submission ON upload_tickets (submission_id);
             CREATE INDEX IF NOT EXISTS audit_package ON audit (package_id, id);
             CREATE INDEX IF NOT EXISTS catalog_kind ON catalog_index (kind, package_id);
             """

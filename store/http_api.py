@@ -497,20 +497,24 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                 self._send(500, {"rule": "INTERNAL", "message": "服务器内部错误", "trace_id": trace})
 
         def do_PUT(self) -> None:
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            ticket = (parse_qs(parsed.query).get("ticket") or [""])[0]
             token = _credential(self)
             if not path.startswith("/v1/uploads/"):
                 self._send(404, {"rule": "VERSION_UNAVAILABLE", "message": "没有这个地址"})
                 return
             try:
-                store.prepare_token(token)
-                store.refresh_hub_if_due(token)
+                # 有 ticket 时不再要求或校验 Authorization：独立终端只凭 URL 上传。
+                if token and not ticket:
+                    store.prepare_token(token)
+                    store.refresh_hub_if_due(token)
                 data = _read_body(self)
                 parts = [part for part in path.split("/") if part]
                 if len(parts) == 4 and parts[2] == "revise":
-                    store.save_revise_upload(token, parts[3], data)
+                    store.save_revise_upload(token, parts[3], data, ticket=ticket)
                 else:
-                    store.save_upload(token, parts[2], data)
+                    store.save_upload(token, parts[2], data, ticket=ticket)
                 self._send(200, {"status": "uploaded"})
             except StoreError as exc:
                 self._fail(exc)

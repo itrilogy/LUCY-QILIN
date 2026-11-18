@@ -25,6 +25,8 @@ from store.states import SUBMISSION, advance
 from store.validator.validate import validate_manifest, validate_path
 from store.views import _check_add_platform, _diff, _findings, _write_tree, review_view
 
+_UPLOAD_TICKET_TTL = 3600
+
 
 def _namespace_of(package_id: str) -> str:
     """`a.b.c` 的命名空间是第一个点之前的 `a`。"""
@@ -101,19 +103,58 @@ class SubmissionMixin:
             submission_id, stored, publisher.id, "uploading", report, submit_kind, None, None, byte_size,
         )
         self._audit(publisher.id, "begin_submit", stored.get("id"), stored.get("version"), channel)
+        ticket = self._new_upload_ticket(submission_id, publisher.id, "submit")
         return {
             "submission_id": submission_id,
             "status": "uploading",
             "rules": [],
-            "put_path": f"/v1/uploads/{submission_id}",
+            "put_path": f"/v1/uploads/{submission_id}?ticket={ticket}",
         }
-    def save_upload(self, token: str, submission_id: str, data: bytes) -> None:
-        with self._lock:
-            self._save_upload(token, submission_id, data)
-    def _save_upload(self, token: str, submission_id: str, data: bytes) -> None:
+    def _new_upload_ticket(self, submission_id: str, account_id: str, scope: str) -> str:
+        """生成一次性上传票据；只存哈希，不把票据写进日志。"""
+        ticket = secrets.token_urlsafe(32)
+        self._db.execute(
+            "INSERT INTO upload_tickets (token_hash, submission_id, account_id, scope, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (hashlib.sha256(ticket.encode()).hexdigest(), submission_id, account_id, scope,
+             int(time.time()) + _UPLOAD_TICKET_TTL),
+        )
+        self._db.commit()
+        return ticket
+
+    def _upload_ticket(self, submission_id: str, scope: str, ticket: str) -> str:
+        """校验并消费一次性票据，返回账号 id。"""
+        if not ticket:
+            raise StoreError("ROLE_FORBIDDEN", "缺少上传票据或登录。")
+        digest = hashlib.sha256(ticket.encode()).hexdigest()
+        row = self._db.execute(
+            "SELECT * FROM upload_tickets WHERE token_hash = ?", (digest,),
+        ).fetchone()
+        if row is None or row["submission_id"] != submission_id or row["scope"] != scope:
+            raise StoreError("ROLE_FORBIDDEN", "上传票据无效或已过期。")
+        if row["used_at"] or int(row["expires_at"]) < int(time.time()):
+            raise StoreError("ROLE_FORBIDDEN", "上传票据无效或已过期。")
+        changed = self._db.execute(
+            "UPDATE upload_tickets SET used_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND used_at IS NULL",
+            (digest,),
+        ).rowcount
+        if changed != 1:
+            raise StoreError("ROLE_FORBIDDEN", "上传票据已被使用。")
+        self._db.commit()
+        return str(row["account_id"])
+
+    def _upload_actor(self, token: str, submission_id: str, scope: str, ticket: str) -> tuple[str, str]:
+        if ticket:
+            return self._upload_ticket(submission_id, scope, ticket), ""
         principal = self._require(token, PUBLISHER_ROLES)
+        return principal.id, principal.role
+
+    def save_upload(self, token: str, submission_id: str, data: bytes, *, ticket: str = "") -> None:
+        with self._lock:
+            self._save_upload(token, submission_id, data, ticket=ticket)
+    def _save_upload(self, token: str, submission_id: str, data: bytes, *, ticket: str = "") -> None:
+        actor_id, actor_role = self._upload_actor(token, submission_id, "submit", ticket)
         row = self._submission(submission_id)
-        if principal.role != "admin" and row["publisher_id"] != principal.id:
+        if actor_role != "admin" and row["publisher_id"] != actor_id:
             raise StoreError("ROLE_FORBIDDEN", "不能上传别人的制品")
         if row["status"] != "uploading" or row["artifact_path"]:
             raise StoreError("VERSION_UNAVAILABLE", "这个上传地址已经用过")
@@ -290,6 +331,7 @@ class SubmissionMixin:
             )
         self._db.execute("DELETE FROM sessions WHERE expires_at < ?", (moment,))
         self._db.execute("DELETE FROM hub_logins WHERE expires_at < ?", (moment,))
+        self._db.execute("DELETE FROM upload_tickets WHERE expires_at < ? OR used_at IS NOT NULL", (moment,))
         if self._db.in_transaction:
             self._db.commit()
         return len(rows) + len(revisions)
@@ -449,18 +491,19 @@ class SubmissionMixin:
             )
             self._db.commit()
             self._audit(publisher.id, "begin_revise", stored.get("id"), stored.get("version"))
+            ticket = self._new_upload_ticket(submission_id, publisher.id, "revise")
             return {
                 "submission_id": submission_id,
                 "status": "uploading",
                 "rules": [],
-                "put_path": f"/v1/uploads/revise/{submission_id}",
+                "put_path": f"/v1/uploads/revise/{submission_id}?ticket={ticket}",
             }
 
-    def save_revise_upload(self, token: str, submission_id: str, data: bytes) -> None:
+    def save_revise_upload(self, token: str, submission_id: str, data: bytes, *, ticket: str = "") -> None:
         with self._lock:
-            principal = self._require(token, PUBLISHER_ROLES)
+            actor_id, actor_role = self._upload_actor(token, submission_id, "revise", ticket)
             row = self._submission(submission_id)
-            if principal.role != "admin" and row["publisher_id"] != principal.id:
+            if actor_role != "admin" and row["publisher_id"] != actor_id:
                 raise StoreError("ROLE_FORBIDDEN", "不能上传别人的修订")
             if row["status"] not in {"pending", "rejected"}:
                 raise StoreError("VERSION_UNAVAILABLE", "只能修订待审核或已退回的提交")

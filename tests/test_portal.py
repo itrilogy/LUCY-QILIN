@@ -232,6 +232,30 @@ class PortalApiTests(unittest.TestCase):
         self.assertEqual(unpublished["status"], "unpublished")
         self.assertEqual(self._get("/v1/catalog")["total"], 0)
 
+    def test_put_url_ticket_uploads_without_bearer_and_is_one_time(self) -> None:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("SKILL.md", SKILL)
+        archive = buf.getvalue()
+        begun = self._send(
+            "/v1/submissions/begin",
+            self.publisher,
+            {"manifest": skill_manifest(), "byte_size": len(archive)},
+        )
+        self.assertIn("?ticket=", begun["put_url"])
+        # 独立终端不继承 MCP Authorization，只凭 put_url 的一次性 ticket。
+        put_req = urllib.request.Request(begun["put_url"], data=archive, method="PUT")
+        with urllib.request.urlopen(put_req) as resp:
+            self.assertEqual(resp.status, 200)
+        created = self._send(f"/v1/submissions/{begun['submission_id']}/finish", self.publisher, {})
+        self.assertEqual(created["status"], "pending")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(urllib.request.Request(begun["put_url"], data=archive, method="PUT"))
+        self.assertEqual(caught.exception.code, 403)
+
     def _publish(self, manifest: dict, skill: str) -> dict:
         created = self._submit(manifest, skill)
         self._send(f"/v1/submissions/{created['submission_id']}/approve", self.admin, {})
