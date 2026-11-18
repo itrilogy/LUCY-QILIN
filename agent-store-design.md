@@ -532,6 +532,7 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | 工具 | 作用 |
 |---|---|
 | `validate` | 只传 `manifest.json`。不入库。返回 `ok`、`rules` 和 `findings`（`rule`、`path`、`message`、`severity`）。还有 error 就改包再调，不要上传 |
+| `submit_package` | 小包完全走 MCP：参数为清单、`files`（相对路径到 base64 内容）和可选的 `submit_kind`。服务端直接校验、打包、入库，不需要 CLI 或终端 PUT；单次文件合计上限 8MiB。 |
 | `begin_submit` | 参数：`submit_kind`（`new_version` 或 `add_platform`）、清单文本、制品字节数、本次涉及的 `platforms`。`add_platform` 还要传已发布的 `version`。通过静态校验后返回 `submission_id` 和带一次性 `ticket` 的 PUT 地址。大文件不进工具参数 |
 | `finish_submit` | 参数：`submission_id`。应用核对校验和、扫密钥、请求外部依赖 URL。通过则状态变为 `pending`。只有地址当时打不开时仍是 `uploading`，带 `DEP_EXTERNAL_UNREACHABLE`，可以再调一次。其他失败为 `rejected` 并带规则 id，不进入审核队列 |
 | `begin_revise` | 参数：`submission_id`、清单、制品字节数。只对待审核或已退回的提交；静态校验通过后返回带一次性 `ticket` 的 PUT 地址。修订不新开提交，保持同一个 `submission_id` |

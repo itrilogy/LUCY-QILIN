@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from typing import Any
 from urllib.parse import quote
@@ -14,6 +16,7 @@ PUBLIC = ("get_spec", "search", "list_versions", "resolve", "describe", "install
 PUBLISHER = (
     "validate",
     "begin_submit",
+    "submit_package",
     "finish_submit",
     "begin_revise",
     "finish_revise",
@@ -103,6 +106,18 @@ _SCHEMAS: dict[str, dict] = {
             "manifest": {"type": "object", "description": "manifest.json 的对象。也可以是它的 JSON 文本。"},
         },
         "required": ["manifest"],
+    },
+    "submit_package": {
+        "description": "小包直接走 MCP 提交：传清单和 base64 文件树，服务端校验、打包、入库，不需要 CLI 或单独终端 PUT。单次文件合计上限 8MiB；更大的包用 begin_submit 拿 ticket put_url。",
+        "properties": {
+            "manifest": {"type": "object", "description": "manifest.json 的对象或 JSON 文本。"},
+            "files": {
+                "type": "object",
+                "description": "相对路径到 base64 内容的映射，例如 {\"SKILL.md\": \"LS0t...\"}。",
+            },
+            "submit_kind": {"type": "string", "description": "new_version 或 add_platform。add_platform 只给 runtime。"},
+        },
+        "required": ["manifest", "files"],
     },
     "begin_submit": {
         "description": "静态校验通过后开始一次提交，返回 submission_id 和一次性 put_url。submit_kind 为 new_version 或 add_platform。大文件不进参数，只传 byte_size。校验还有错误时不要调。由安装器对 put_url 做 PUT，不要自己编上传命令。",
@@ -225,7 +240,7 @@ _PACKAGE = (
     "要上架时：先 get_spec 取对应种类的规范，在本地整理目录，再 validate。"
     "ok 为 false，或 findings 里还有 severity 为 error 的，就按 path 和 message 改包，再 validate。"
     "不要在还有错误时 begin_submit。"
-    "ok 为 true 之后，交整个目录用本机的 store submit。它会自己 begin_submit、PUT 和 finish_submit。"
+    "ok 为 true 之后，小包可直接用 submit_package 传清单和 base64 文件树；大包用 begin_submit 拿 ticket put_url，PUT 后再 finish_submit。"
     "不要再手动调一遍，以免交成两条。不要自己编上传命令，不要把密钥文件或密钥值打进包。"
     "把 pending、uploading 或规则原样告诉用户。"
     "退回原因在 list_my_submissions 和 get_submission 里。"
@@ -367,6 +382,32 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
         findings = store.explain_manifest(token, manifest)
         rules = [item["rule"] for item in findings if item["severity"] == "error"]
         return {"ok": not rules, "rules": rules, "findings": findings}
+    if name == "submit_package":
+        manifest = arguments["manifest"]
+        if isinstance(manifest, str):
+            manifest = json.loads(manifest)
+        raw_files = arguments.get("files") or {}
+        if not isinstance(raw_files, dict):
+            raise StoreError("CHECKSUM", "files 必须是对象")
+        files: dict[str, bytes] = {}
+        total = 0
+        for raw_name, encoded in raw_files.items():
+            if not isinstance(raw_name, str) or not isinstance(encoded, str):
+                raise StoreError("CHECKSUM", "files 必须是路径到 base64 文本的映射")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise StoreError("CHECKSUM", f"{raw_name} 不是合法 base64") from exc
+            total += len(content)
+            if total > 8 * 1024 * 1024:
+                raise StoreError("CHECKSUM", "inline 文件合计超过 8MiB，请改用 begin_submit")
+            files[raw_name] = content
+        result = store.submit(
+            token, manifest, files,
+            submit_kind=str(arguments.get("submit_kind") or "new_version"),
+            channel="mcp",
+        )
+        return {"submission_id": result.submission_id, "status": result.status, "rules": result.rules}
     if name == "begin_submit":
         manifest = arguments["manifest"]
         if isinstance(manifest, str):

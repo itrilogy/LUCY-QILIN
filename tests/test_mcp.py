@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import socket
@@ -106,6 +107,15 @@ class McpTests(unittest.TestCase):
             "clientInfo": {"name": "test", "version": "0"},
         }, token=self.admin)["result"]["instructions"]
         self.assertIn("不改清单字段", admin_guide)
+
+    def test_submit_package_is_fully_mcp_without_cli(self) -> None:
+        result = self._tool("submit_package", {
+            "manifest": skill_manifest(),
+            "files": {"SKILL.md": base64.b64encode(SKILL.encode()).decode()},
+        }, self.publisher)
+        self.assertEqual(result["status"], "pending", result)
+        names = [item["name"] for item in self._rpc("tools/list", {}, token=self.publisher)["result"]["tools"]]
+        self.assertIn("submit_package", names)
 
     def test_spec_comes_from_the_store_not_a_skill_file(self) -> None:
         listed = self._rpc("resources/list", {}, token="")
