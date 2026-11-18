@@ -12,7 +12,7 @@ from pathlib import Path
 
 from store.http_api import serve
 from store.service import Store
-from tests.test_service import DESC, SUMMARY, skill_manifest
+from tests.test_service import SUMMARY, skill_manifest
 
 SKILL = f"---\nname: gov\ndescription: {SUMMARY}\nversion: 3.2.0\n---\n\n# 公文\n"
 
@@ -193,6 +193,44 @@ class PortalApiTests(unittest.TestCase):
         me = json.load(urllib.request.urlopen(self.base + "/v1/identity"))
         self.assertEqual(me["mode"], "unset")
         self.assertEqual(me["app_id"], "lucy-qilin")
+
+    def test_http_withdraw_and_unpublish_routes(self) -> None:
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("SKILL.md", SKILL)
+        archive = buf.getvalue()
+        begun = self._send(
+            "/v1/submissions/begin",
+            self.publisher,
+            {"manifest": skill_manifest(), "byte_size": len(archive)},
+        )
+        self.assertEqual(begun["status"], "uploading")
+        put_req = urllib.request.Request(
+            begun["put_url"],
+            data=archive,
+            method="PUT",
+            headers={"Authorization": f"Bearer {self.publisher}"},
+        )
+        with urllib.request.urlopen(put_req) as resp:
+            self.assertEqual(resp.status, 200)
+        created = self._send(f"/v1/submissions/{begun['submission_id']}/finish", self.publisher, {})
+        self.assertEqual(created["status"], "pending")
+        withdrawn = self._send(f"/v1/submissions/{created['submission_id']}/withdraw", self.publisher, {})
+        self.assertEqual(withdrawn["status"], "withdrawn")
+        seen = self._get(f"/v1/submissions/{created['submission_id']}", self.publisher)
+        self.assertEqual(seen["status"], "withdrawn")
+
+        second = self._submit(skill_manifest(version="3.3.0"), SKILL.replace("3.2.0", "3.3.0"))
+        self._send(f"/v1/submissions/{second['submission_id']}/approve", self.admin, {})
+        self.assertEqual(self._get("/v1/catalog")["total"], 1)
+        unpublished = self._send(
+            "/v1/packages/luxi.gov-writer/3.3.0/unpublish", self.admin, {"reason": "发现问题下架"}
+        )
+        self.assertEqual(unpublished["status"], "unpublished")
+        self.assertEqual(self._get("/v1/catalog")["total"], 0)
 
     def _publish(self, manifest: dict, skill: str) -> dict:
         created = self._submit(manifest, skill)

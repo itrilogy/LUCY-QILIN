@@ -25,7 +25,7 @@ from store.http_api import serve
 from store.identity import HubIdentity, IdentityError
 from store.installer import run as run_install
 from store.service import Store
-from tests.test_service import SKILL, SUMMARY, DESC, skill_manifest
+from tests.test_service import skill_manifest
 
 
 def _conflict_zip() -> bytes:

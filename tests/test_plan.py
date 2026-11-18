@@ -9,7 +9,7 @@ from pathlib import Path
 
 from store.plan import PlanError, install_plan, resolve
 from store.service import Store, StoreError
-from tests.test_service import DESC, SKILL, SUMMARY, skill_manifest
+from tests.test_service import SKILL, SUMMARY, skill_manifest
 
 BASE = "http://store.example"
 

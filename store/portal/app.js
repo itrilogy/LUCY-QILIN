@@ -40,6 +40,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     function signedIn() { return state.role && state.role !== "anonymous"; }
 
     async function api(path, options = {}) {
+      const method = (options.method || "GET").toUpperCase();
+      const canRetry = method === "GET" && !options._retried;
       const headers = { ...(options.headers || {}) };
       if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
       const controller = new AbortController();
@@ -52,14 +54,19 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       try {
         response = await fetch(path, { ...options, headers, credentials: "same-origin", signal: controller.signal });
       } catch (caught) {
+        clearTimeout(timer);
         if (caught && caught.name === "AbortError") {
           const error = new Error("请求超时或被取消。");
           error.name = "AbortError";
           throw error;
         }
+        if (canRetry) return api(path, { ...options, _retried: true });
         throw caught;
       } finally {
         clearTimeout(timer);
+      }
+      if (response.status >= 500 && canRetry) {
+        return api(path, { ...options, _retried: true });
       }
       const text = await response.text();
       let body = {};
@@ -69,6 +76,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       if (!response.ok) {
         const error = new Error(body.message || "请求失败");
         error.rule = body.rule || "";
+        error.status = response.status;
         throw error;
       }
       return body;
@@ -416,9 +424,37 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       document.getElementById("detail-lead").textContent = manifest.summary || packageId;
       document.getElementById("detail-prose").textContent = manifest.description || "";
       document.getElementById("add-platform").classList.toggle("hidden", manifest.kind !== "runtime");
+      const canUnpublish = ["reviewer", "admin"].includes(state.role);
+      const unpublishPanel = document.getElementById("unpublish-panel");
+      if (unpublishPanel) {
+        unpublishPanel.classList.toggle("hidden", !canUnpublish);
+        setState("unpublish-state", "", false);
+      }
       fillChoices(manifest, versions.find((item) => item.version === version));
       document.getElementById("detail-sheet").replaceChildren(sheet(manifest, null));
     }
+
+    document.getElementById("unpublish-submit")?.addEventListener("click", async () => {
+      const reasonInput = document.getElementById("unpublish-reason");
+      const version = document.getElementById("plan-version").value;
+      const reason = (reasonInput?.value || "").trim();
+      if (!reason) {
+        setState("unpublish-state", "下架必须填写原因。", true);
+        reasonInput?.focus();
+        return;
+      }
+      try {
+        await api(`/v1/packages/${encodeURIComponent(state.packageId)}/${encodeURIComponent(version)}/unpublish`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        reasonInput.value = "";
+        setState("unpublish-state", `已下架 ${state.packageId}@${version}。`, false);
+        openDetail(state.packageId, state.kind === "runtime");
+      } catch (error) {
+        setState("unpublish-state", (error.rule ? error.rule + " " : "") + error.message, true);
+      }
+    });
 
     function fillChoices(manifest, versionRow) {
       const clients = document.getElementById("plan-client");
@@ -1297,7 +1333,9 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         platforms: "f-platforms", clients: "f-clients",
         "knowledge.entry": "f-entry", "mcp.transport": "f-transport",
         "mcp.url": "f-url", "mcp.command": "f-command", "mcp.args": "f-args",
-        "invoke.form": "f-invoke", "runtime.bin_name": "f-bin",
+        "invoke.form": "f-invoke", invoke: "f-invoke", "runtime.bin_name": "f-bin",
+        plugin: "f-plugin-tier", "package.json": "f-plugin-dir", package: "f-plugin-dir",
+        "SKILL.md": "f-skill",
         "plugin.tier": "f-plugin-tier", "plugin.form": "f-plugin-form",
         "plugin.entry": "f-plugin-entry", "plugin.client": "f-plugin-client",
         "plugin.patch": "f-plugin-patch", "plugin.dsh": "f-plugin-dsh",
@@ -1305,6 +1343,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         "plugin.external": "f-plugin-external",
         secrets: "f-secrets", "depends.store": "f-store",
         "depends.skills": "f-skills", "depends.mcp": "f-mcp-deps",
+        "depends.external": "f-ext-name",
       };
       if (direct[path]) return document.getElementById(direct[path]);
       const prefix = Object.keys(direct).find((key) => path.startsWith(key + ".") || path.startsWith(key + "["));
@@ -1355,10 +1394,31 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           block.append(text("p", item.status, "foot"));
           if (item.review_reason) block.append(text("p", "退回原因：" + item.review_reason));
           if (item.status === "pending" || item.status === "rejected") {
+            const actions = document.createElement("div");
+            actions.className = "row";
             const button = text("button", "修订此提交", "btn");
             button.type = "button";
             button.addEventListener("click", () => revise(item.id));
-            block.append(button);
+            actions.append(button);
+            if (item.status === "pending") {
+              const withdrawBtn = text("button", "撤回", "btn danger");
+              withdrawBtn.type = "button";
+              withdrawBtn.addEventListener("click", async () => {
+                withdrawBtn.disabled = true;
+                try {
+                  await api(`/v1/submissions/${encodeURIComponent(item.id)}/withdraw`, {
+                    method: "POST",
+                    body: "{}",
+                  });
+                  loadMine();
+                } catch (error) {
+                  setState("mine-state", (error.rule ? error.rule + " " : "") + error.message, true);
+                  withdrawBtn.disabled = false;
+                }
+              });
+              actions.append(withdrawBtn);
+            }
+            block.append(actions);
           }
           list.append(block);
         }

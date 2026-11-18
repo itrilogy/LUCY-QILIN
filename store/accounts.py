@@ -1,4 +1,4 @@
-"""每人一把由商店生成的 KEY。只存盐和校验值，明文不落库。"""
+"""每人一把由商店生成的 KEY。鉴权用 key_prefix + scrypt；内网部署下 accounts.key_plain 持久化供本人复制配置。"""
 
 from __future__ import annotations
 

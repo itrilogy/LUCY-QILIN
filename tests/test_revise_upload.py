@@ -127,6 +127,10 @@ class ReviseUploadTests(unittest.TestCase):
         ).fetchone())
         self.assertFalse(archive.exists())
 
+    def test_schema_user_version_is_recorded(self) -> None:
+        version = int(self.store._db.execute("PRAGMA user_version").fetchone()[0])
+        self.assertGreaterEqual(version, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

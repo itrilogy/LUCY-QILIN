@@ -42,40 +42,35 @@ class SubmissionMixin:
         channel: str = "service",
     ) -> SubmitResult:
         with self._lock:
-            return self._submit(token, manifest, files, submit_kind=submit_kind, channel=channel)
-    def _submit(
-        self,
-        token: str,
-        manifest: dict,
-        files: dict[str, bytes],
-        *,
-        submit_kind: str,
-        channel: str,
-    ) -> SubmitResult:
-        publisher = self._require(token, PUBLISHER_ROLES)
-        stored = self._prepare(publisher, manifest, submit_kind)
+            publisher = self._require(token, PUBLISHER_ROLES)
+            stored = self._prepare(publisher, manifest, submit_kind)
+            releases = self._releases()
         package_id = str(stored.get("id") or "")
         version = str(stored.get("version") or "")
         submission_id = secrets.token_hex(8)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_tree(root, files, stored)
-            report = validate_path(root, releases=self._releases())
+            report = validate_path(root, releases=releases)
             archive = digest = None
             if report.ok:
                 archive = self.blob_dir / "submissions" / f"{submission_id}.zip"
                 digest = write_zip(root, archive)
+            with self._lock:
                 try:
-                    self._keep_assets(submission_id, root, stored)
+                    # 锁外打包期间若有并发发布，二次核对归属与版本不可变性。
+                    stored = self._prepare(publisher, manifest, submit_kind)
+                    if report.ok and archive is not None:
+                        self._keep_assets(submission_id, root, stored)
                 except StoreError:
-                    # 资产没搬成功就不要留下半截压缩包。
-                    archive.unlink(missing_ok=True)
+                    if archive is not None:
+                        archive.unlink(missing_ok=True)
                     raise
-        self._insert_submission(
-            submission_id, stored, publisher.id, "pending" if report.ok else "rejected",
-            report, submit_kind, archive, digest,
-        )
-        self._audit(publisher.id, "submit", package_id, version, channel)
+                self._insert_submission(
+                    submission_id, stored, publisher.id, "pending" if report.ok else "rejected",
+                    report, submit_kind, archive, digest,
+                )
+                self._audit(publisher.id, "submit", package_id, version, channel)
         return SubmitResult(submission_id, "pending" if report.ok else "rejected", report.rules())
     def begin_submit(
         self,
@@ -267,7 +262,7 @@ class SubmissionMixin:
         rows = self._db.execute(
             """
             SELECT id, artifact_path FROM submissions
-            WHERE status = 'uploading'
+            WHERE status IN ('uploading', 'validating')
               AND CAST(strftime('%s', created_at) AS INTEGER) < ?
             """,
             (cutoff,),
@@ -293,7 +288,9 @@ class SubmissionMixin:
             self._db.execute(
                 "DELETE FROM revisions WHERE submission_id = ?", (revision["submission_id"],)
             )
-        if rows or revisions:
+        self._db.execute("DELETE FROM sessions WHERE expires_at < ?", (moment,))
+        self._db.execute("DELETE FROM hub_logins WHERE expires_at < ?", (moment,))
+        if self._db.in_transaction:
             self._db.commit()
         return len(rows) + len(revisions)
     def list_my_submissions(self, token: str) -> list[dict]:

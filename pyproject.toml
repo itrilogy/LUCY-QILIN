@@ -37,5 +37,5 @@ target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
-# 只查语法错误与未定义名字。样式另开一轮，先让 CI 能拦住 NameError 这类问题。
-select = ["E9", "F821"]
+# 拦截语法错误、未定义变量与未使用导入/局部变量。
+select = ["E9", "F"]

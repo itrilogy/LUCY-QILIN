@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from store.errors import Principal, StoreError
-from store.semver import cmp as _cmp
 from store.validator.validate import Release
 
+_SCHEMA_VERSION = 1
 _MAX_BYTES = 32 * 1024 * 1024
 _UPLOAD_TTL_HOURS = 72
 _RETRYABLE_URLS = frozenset({"DEP_EXTERNAL_UNREACHABLE"})
@@ -196,11 +196,24 @@ class StoreBase:
             CREATE INDEX IF NOT EXISTS catalog_kind ON catalog_index (kind, package_id);
             """
         )
-        self._migrate_accounts()
-        self._backfill_owners()
+        self._migrate_schema()
         self._rebuild_catalog_index()
-        # 启动时清一次过期上传：上次进程退出前留下的 `uploading` 行不会自己消失。
+        # 启动时恢复上次异常退出残留的 validating，并清理过期上传。
+        self._db.execute("UPDATE submissions SET status = 'uploading' WHERE status = 'validating'")
+        self._db.commit()
         self._prune_stale_uploads(max_age_hours=_UPLOAD_TTL_HOURS, now=None)
+
+    def _migrate_schema(self) -> None:
+        """按 PRAGMA user_version 执行结构迁移；存量旧库从 0 升级到 _SCHEMA_VERSION。"""
+        version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
+        if version < 1:
+            self._migrate_accounts()
+            self._backfill_owners()
+            self._db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+            self._db.commit()
+        else:
+            # 即使库版本已是最新，仍保证历史数据补填幂等。
+            self._backfill_owners()
     def _migrate_accounts(self) -> None:
         cols = {row["name"] for row in self._db.execute("PRAGMA table_info(accounts)")}
         for name in ("real_name", "nickname", "department", "job_title"):

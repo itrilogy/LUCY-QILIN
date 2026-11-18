@@ -24,6 +24,7 @@ from store.safety import PathEscape, safe_join
 _BIN_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 # 与服务端制品上限同量级。下载不设上限时，一个异常制品就能撑爆客户端磁盘。
 _MAX_DOWNLOAD = 64 * 1024 * 1024
+_MAX_RPC_BYTES = 4 * 1024 * 1024
 _CHUNK = 256 * 1024
 
 KNOWN = {
@@ -375,7 +376,9 @@ def _post_rpc(
         headers = getattr(response, "headers", None)
         if headers is not None and headers.get("Mcp-Session-Id"):
             session["id"] = headers.get("Mcp-Session-Id")
-        raw = response.read()
+        raw = response.read(_MAX_RPC_BYTES + 1)
+    if len(raw) > _MAX_RPC_BYTES:
+        raise ValueError("body")
     if status >= 400:
         raise urllib.error.URLError(f"status {status}")
     if not raw and allow_empty:

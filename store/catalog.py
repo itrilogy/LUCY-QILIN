@@ -20,9 +20,6 @@ from store.validator.registry import PLUGIN_REVIEW_ITEMS
 from store.views import (
     _check_add_platform,
     _compute_file_diffs,
-    _diff,
-    _findings,
-    _has_rule,
     _public,
     _read_archive_preview,
     _read_artifact,

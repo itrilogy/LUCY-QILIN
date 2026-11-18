@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote
 
 from store.protocol import ALL_DATA_URIS, NAMES, blurb, data_blurb, data_mime, data_text, name_from_uri, text, uri
 from store.service import Store, StoreError
@@ -307,6 +308,8 @@ def handle(store: Store, token: str, message: Any, *, base_url: str) -> dict | N
             payload = _call(store, token, name, arguments, base_url)
         except StoreError as exc:
             return _fail(request_id, exc.rule, exc.message)
+        except json.JSONDecodeError:
+            return _fail(request_id, "SPEC_VERSION", "manifest 不是合法 JSON")
         except (KeyError, TypeError, ValueError):
             return _fail(request_id, "SPEC_VERSION", "工具参数不完整")
         return _ok(request_id, _content(payload, False))
@@ -492,10 +495,12 @@ def _tool(name: str) -> dict:
 
 
 def _artifact_url(base_url: str, arguments: dict) -> str:
-    url = f"{base_url.rstrip('/')}/v1/artifacts/{arguments['id']}/{arguments['version']}"
+    pkg_id = quote(str(arguments["id"]), safe="")
+    version = quote(str(arguments["version"]), safe="")
+    url = f"{base_url.rstrip('/')}/v1/artifacts/{pkg_id}/{version}"
     platform = arguments.get("platform")
     if platform:
-        return f"{url}?platform={platform}"
+        return f"{url}?platform={quote(str(platform), safe='')}"
     return url
 
 

@@ -8,6 +8,8 @@ import urllib.request
 
 def probe_url(url: str, timeout: float = 10) -> int | None:
     """HEAD，失败再 GET。返回状态码；连不上则返回 None。"""
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        return None
     for method in ("HEAD", "GET"):
         request = urllib.request.Request(url, method=method)
         try:

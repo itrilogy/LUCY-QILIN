@@ -247,7 +247,7 @@ class AuthMixin:
         job_title: str,
         password: str,
     ) -> tuple[dict, str, str]:
-        from store.accounts import key_prefix, make_key, optional_text, password_of, person_name, username_of
+        from store.accounts import make_key, optional_text, password_of, person_name, username_of
 
         username = username_of(username)
         if self._db.execute("SELECT 1 FROM accounts WHERE username = ?", (username,)).fetchone():

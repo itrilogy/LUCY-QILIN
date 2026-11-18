@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     submit = sub.add_parser("submit", help="把写好清单的目录交到商店")
     submit.add_argument("directory", type=Path)
     submit.add_argument("--base", default="", help="商店地址。默认用 QILIN_STORE_URL，否则是本机 8787")
+    submit.add_argument("--add-platform", action="store_true", help="给已发布的 runtime 版本追加平台")
     install = sub.add_parser("install", help="执行安装计划")
     install.add_argument("plan", type=Path)
     install.add_argument("--dry-run", action="store_true")
@@ -147,6 +148,7 @@ def _submit(args: argparse.Namespace) -> int:
         args.directory,
         base=base,
         key=os.environ.get("QILIN_STORE_KEY", ""),
+        submit_kind="add_platform" if getattr(args, "add_platform", False) else "new_version",
     )
     print(json.dumps(payload, ensure_ascii=False))
     return code

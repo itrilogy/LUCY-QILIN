@@ -49,6 +49,14 @@ class RateLimitTests(unittest.TestCase):
         self.assertEqual(status, 429)
         self.assertEqual(body["rule"], "RATE_LIMITED")
 
+    def test_ip_limit_cannot_be_bypassed_by_changing_username(self) -> None:
+        for username in ("nobody-a", "nobody-b"):
+            status, _ = self._post("/v1/login", {"username": username, "password": "WrongPass1"})
+            self.assertIn(status, {400, 401})
+        status, body = self._post("/v1/login", {"username": "nobody-c", "password": "WrongPass1"})
+        self.assertEqual(status, 429)
+        self.assertEqual(body["rule"], "RATE_LIMITED")
+
     def test_successful_login_resets_the_window(self) -> None:
         status, issued = self._post("/v1/account", {
             "username": "rateuser",

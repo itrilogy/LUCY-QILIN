@@ -97,6 +97,19 @@ class RestoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             restore(self.dest, self.root / "other.db", self.root / "other-blobs")
 
+    def test_restore_rejects_path_escape_and_cleans_wal(self) -> None:
+        payload = json.loads((self.dest / "backup.json").read_text(encoding="utf-8"))
+        payload["checksums"]["../escape.txt"] = "0" * 64
+        (self.dest / "backup.json").write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            restore(self.dest, self.root / "other.db", self.root / "other-blobs")
+        payload["checksums"].pop("../escape.txt")
+        (self.dest / "backup.json").write_text(json.dumps(payload), encoding="utf-8")
+        wal = Path(f"{self.root / 'store.db'}-wal")
+        wal.write_bytes(b"stale-wal")
+        restore(self.dest, self.root / "store.db", self.root / "blobs", force=True)
+        self.assertFalse(wal.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

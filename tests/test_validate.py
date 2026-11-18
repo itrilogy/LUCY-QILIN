@@ -130,6 +130,7 @@ class ValidateTests(unittest.TestCase):
         root = self._tmp("unreachable")
         write_package(root, manifest(depends=_external("https://127.0.0.1:9/pandoc")))
         self.assertIsNone(probe_url("http://127.0.0.1:9/pandoc", timeout=0.5))
+        self.assertIsNone(probe_url("file:///etc/hosts", timeout=0.5))
         report = validate_path(root, check_urls=True, probe=lambda url: None)
         self.assertIn("DEP_EXTERNAL_UNREACHABLE", report.rules())
 

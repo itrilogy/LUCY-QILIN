@@ -14,6 +14,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from store.safety import PathEscape, safe_join
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -91,18 +93,29 @@ def restore(backup_dir: Path, db_path: Path, blob_dir: Path, *, force: bool = Fa
     if not checksums:
         raise ValueError("备份缺少校验和")
     for relative, expected in checksums.items():
-        source = backup_dir / relative
+        try:
+            source = safe_join(backup_dir, str(relative))
+        except PathEscape as exc:
+            raise ValueError(f"备份路径不合法：{relative}") from exc
         if not source.is_file():
             raise FileNotFoundError(f"备份文件缺失：{relative}")
         if _sha256(source) != expected:
             raise ValueError(f"校验和不符：{relative}")
+    try:
+        source_db = safe_join(backup_dir, str(manifest.get("database") or ""))
+        source_blobs = safe_join(backup_dir, str(manifest.get("blobs") or ""))
+    except PathEscape as exc:
+        raise ValueError("备份清单路径不合法") from exc
     if db_path.exists() and not force:
         raise FileExistsError(f"目标数据库已存在：{db_path}")
     if blob_dir.exists() and any(blob_dir.iterdir()) and not force:
         raise FileExistsError(f"目标制品目录不是空的：{blob_dir}")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(backup_dir / manifest["database"], db_path)
-    source_blobs = backup_dir / manifest["blobs"]
+    temp_db = db_path.with_name(db_path.name + ".tmp")
+    shutil.copyfile(source_db, temp_db)
+    temp_db.replace(db_path)
+    Path(f"{db_path}-wal").unlink(missing_ok=True)
+    Path(f"{db_path}-shm").unlink(missing_ok=True)
     if source_blobs.is_dir():
         shutil.copytree(source_blobs, blob_dir, dirs_exist_ok=True)
     return manifest

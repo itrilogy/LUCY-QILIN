@@ -8,11 +8,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from store.base import _MAX_BYTES
 from store.blobs import write_zip
 from store.validator.validate import validate_path
 
 
-def submit_directory(root: Path, *, base: str, key: str) -> tuple[int, dict]:
+def submit_directory(
+    root: Path, *, base: str, key: str, submit_kind: str = "new_version"
+) -> tuple[int, dict]:
     root = root.expanduser().resolve()
     if not (root / "manifest.json").is_file():
         return 2, {"status": "invalid", "message": "目录里还没有 manifest.json"}
@@ -34,9 +37,15 @@ def submit_directory(root: Path, *, base: str, key: str) -> tuple[int, dict]:
         }
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     archive = _zip(root)
+    if len(archive) > _MAX_BYTES:
+        return 1, {
+            "status": "invalid",
+            "rules": ["CHECKSUM"],
+            "message": "制品大小不在允许范围内",
+        }
     started = _tool(base, key, "begin_submit", {
         "manifest": manifest,
-        "submit_kind": "new_version",
+        "submit_kind": submit_kind,
         "byte_size": len(archive),
     })
     if started.get("rule") or started.get("status") != "uploading" or not started.get("put_url"):

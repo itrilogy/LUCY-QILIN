@@ -15,7 +15,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from store.installer import run
-from store.service import Store
 from tests.test_plan import StorePlanTests
 
 

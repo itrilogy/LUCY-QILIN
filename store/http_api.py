@@ -321,12 +321,16 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     return
                 if path == "/v1/login":
                     username = str(body.get("username") or "").strip().lower()
+                    # 同时限制单个 IP 和 (IP, 用户名)，避免换用户名绕过每 IP 次数。
+                    self._limit("login")
                     self._limit("login", username)
                     profile, session = store.login_account(
                         str(body.get("username") or ""),
                         str(body.get("password") or ""),
                     )
-                    self.server.limiters["login"].reset(f"{self._client_ip()}:{username}")
+                    ip = self._client_ip()
+                    self.server.limiters["login"].reset(ip)
+                    self.server.limiters["login"].reset(f"{ip}:{username}")
                     self._send(200, profile, _session_cookie(session, secure=_secure(self)))
                     return
                 if path == "/v1/logout":
@@ -409,6 +413,23 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                         base_url=_base(self),
                     ))
                     return
+                if path == "/v1/submissions/begin":
+                    started = store.begin_submit(
+                        token,
+                        body["manifest"],
+                        submit_kind=str(body.get("submit_kind") or "new_version"),
+                        byte_size=int(body["byte_size"]),
+                        channel="portal",
+                    )
+                    if started.get("put_path"):
+                        started["put_url"] = _base(self).rstrip("/") + started["put_path"]
+                    started.pop("put_path", None)
+                    self._send(200, started)
+                    return
+                if path.startswith("/v1/submissions/") and path.endswith("/finish"):
+                    result = store.finish_submit(token, unquote(path.split("/")[3]), channel="portal")
+                    self._send(200, _result(result))
+                    return
                 if path == "/v1/submissions":
                     result = store.submit(
                         token, body["manifest"], _files(body), channel="portal",
@@ -447,8 +468,21 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
                     self._send(200, {"status": "published"})
                     return
                 if path.startswith("/v1/submissions/") and path.endswith("/reject"):
-                    store.reject(token, path.split("/")[3], str(body.get("reason") or ""))
+                    store.reject(token, unquote(path.split("/")[3]), str(body.get("reason") or ""))
                     self._send(200, {"status": "rejected"})
+                    return
+                if path.startswith("/v1/submissions/") and path.endswith("/withdraw"):
+                    store.withdraw(token, unquote(path.split("/")[3]))
+                    self._send(200, {"status": "withdrawn"})
+                    return
+                if path.startswith("/v1/packages/") and path.endswith("/unpublish"):
+                    parts = [part for part in path.split("/") if part]
+                    if len(parts) != 5:
+                        raise StoreError("VERSION_UNAVAILABLE", "没有这个地址")
+                    store.unpublish(
+                        token, unquote(parts[2]), unquote(parts[3]), str(body.get("reason") or "")
+                    )
+                    self._send(200, {"status": "unpublished"})
                     return
                 self._send(404, {"rule": "VERSION_UNAVAILABLE", "message": "没有这个地址"})
             except StoreError as exc:

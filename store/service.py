@@ -19,4 +19,12 @@ class Store(StoreBase, AuthMixin, SubmissionMixin, CatalogMixin):
     """门店的唯一入口。方法由各 mixin 提供，状态在 StoreBase。"""
 
 
-__all__ = ["Store", "StoreError", "Principal", "SubmitResult", "_MAX_BYTES", "_UPLOAD_TTL_HOURS"]
+__all__ = [
+    "Store",
+    "StoreError",
+    "Principal",
+    "SubmitResult",
+    "_MAX_BYTES",
+    "_RETRYABLE_URLS",
+    "_UPLOAD_TTL_HOURS",
+]

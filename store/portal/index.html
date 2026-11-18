@@ -115,6 +115,16 @@
               <button type="button" class="btn" id="new-version">上架新版本</button>
               <button type="button" class="btn hidden" id="add-platform">追加平台</button>
             </div>
+            <div class="group hidden" id="unpublish-panel">
+              <h2>下架选定版本</h2>
+              <p class="foot">仅审核或管理员可下架已发布版本。下架必须填写原因，已安装到用户本机的副本不受影响。</p>
+              <label for="unpublish-reason">下架原因 <abbr class="req">必填</abbr></label>
+              <input id="unpublish-reason" placeholder="填写下架原因" />
+              <div class="row">
+                <button type="button" class="btn danger" id="unpublish-submit">下架此版本</button>
+              </div>
+              <p class="state" id="unpublish-state" role="status" aria-live="polite"></p>
+            </div>
           </div>
           <div id="detail-sheet"></div>
         </section>

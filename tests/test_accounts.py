@@ -99,7 +99,7 @@ class AccountTests(unittest.TestCase):
             "username": "admin.one", "real_name": "沈林", "nickname": "林深", "key": "my-own-key",
         }, expect=400)
         self.assertEqual(chosen["rule"], "KEY_INVALID")
-        _admin, cookie, key = self._create("admin.one", "沈林", "林深")
+        _admin, cookie, _key = self._create("admin.one", "沈林", "林深")
         again = self._post("/v1/account", {
             "username": "admin.one", "real_name": "另一个", "nickname": "另一个",
         }, expect=400)

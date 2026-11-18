@@ -45,7 +45,21 @@ def post(path: str, body: dict, key: str) -> dict:
         return json.loads(response.read().decode())
 
 
-def create_author(admin_key: str) -> tuple[str, str]:
+def ensure_author(admin_key: str) -> tuple[str, str]:
+    cache = ROOT / "var/accounts/e2e-author.json"
+    if cache.is_file():
+        try:
+            saved = json.loads(cache.read_text(encoding="utf-8"))
+            req = urllib.request.Request(
+                BASE + "/v1/me",
+                headers={"Authorization": "Bearer " + str(saved.get("key") or "")},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                me = json.loads(resp.read().decode())
+            if me.get("role") in {"publisher", "reviewer", "admin"}:
+                return str(saved["id"]), str(saved["key"])
+        except Exception:
+            pass
     username = "e2e.author." + secrets.token_hex(3)
     password = "E2e" + secrets.token_hex(6) + "9"
     result = post("/v1/account", {
@@ -55,6 +69,11 @@ def create_author(admin_key: str) -> tuple[str, str]:
         "department": "测试",
         "password": password,
     }, admin_key)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(
+        json.dumps({"id": result["id"], "username": username, "key": result["key"]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return result["id"], result["key"]
 
 
@@ -108,7 +127,7 @@ def pending_plugin(key: str, package_id: str) -> str:
 
 def main() -> int:
     admin_key_value = admin_key()
-    author_id, author_key = create_author(admin_key_value)
+    _author_id, author_key = ensure_author(admin_key_value)
     package_id = "e2e" + secrets.token_hex(3) + ".portal-check"
     submission_id = pending_plugin(author_key, package_id)
     try:
@@ -203,13 +222,9 @@ def main() -> int:
         print("portal e2e: ok")
         return 0
     finally:
-        # 失败时尽量把待审插件退回，避免留在队列里。
+        # 失败时尽量把待审插件退回，避免留在队列里；测试作者账号固定复用，不再每次停用新建。
         try:
             post(f"/v1/submissions/{submission_id}/reject", {"reason": "E2E 清理"}, admin_key_value)
-        except Exception:
-            pass
-        try:
-            post(f"/v1/accounts/{author_id}/disable", {}, admin_key_value)
         except Exception:
             pass
 

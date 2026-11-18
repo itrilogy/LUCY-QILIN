@@ -1080,5 +1080,8 @@ Python 依赖不进商店镜像。写法固定为 `depends.external`：`detect` 
 11. 公开清单与审核清单分开。已做。`describe` 只返回商店认识的顶层字段，`author` 只留 `display_name`；审核单保留全文，包括还不认识的顶层字段。嵌套块内部的未知子字段仍会出现在详情里。
 12. 校验器的类型守卫。已做。`Report.guard` 在类型不符时记一条 finding 并返回默认值，不把畸形字段抛成异常。类型和内容绑在同一句里的判断没有拆成两条。仍未做：鉴权移出全局锁。
 13. 登记表不再充当集市资产名单。已做（2026-11-16）：删除 `DIRECTORY_IDS`/`REGISTERED_IDS`、按目录名强改 id、`ID_UNREGISTERED` 与发布确认门；新增 `ID_FORMAT`；同一 `id` 归首个发布者，`submit` 与 `approve` 都校验。
+14. 插件品类（`kind=plugin`）与 8 项审核清单。已做（2026-11-17）：支持 Tier A/B 纯 JS 插件校验、门户表单与目录选择、审核页 8 项清单记录（`review_plugin`），安装计划只暂存（`plugin_stage` / `plugin_confirm`），不在商店执行代码。
+15. 四角色模型、贡献链路与内网 KEY 策略。已做（2026-11-17）：角色分为 `member` / `publisher` / `reviewer` / `admin`，全品类禁止自审（`SELF_REVIEW`）；提交时写入账号快照，审核与管理员可看贡献排行与明细；内网持久化 `key_plain`，连接页四标签直接嵌入 KEY。
+16. 协议闭环与深度硬化。已做（2026-11-18）：HTTP 补齐 `withdraw`、`unpublish` 与三段式 `submissions/begin`、`finish`，门户可直接完成修订/撤回/下架，CLI `store submit` 支持 `--add-platform`；`catalog_index` 保留真实 `published_at`；单包查询与安装计划按需加载；已发布制品独立归档至 `blobs/releases/`；备份恢复补路径守卫与 WAL 残留清理；引入 `PRAGMA user_version` 版本迁移。
 
 不做的仍然有效：不自建网关，不做产品密钥保管，不在商店服务器上执行安装，不把编排技能拆成一个技能一个 MCP 服务。
