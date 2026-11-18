@@ -173,6 +173,8 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 
 依赖里的 `depends.skills`、`depends.mcp`、`depends.store` 写版本范围，不写「最新」。安装时对每一项调用同一套 `resolve`。范围写 `*` 等价于不限制，仍然会选中当前最高的匹配版本，并记在安装计划里，避免事后说不清装的是哪一版。
 
+`depends.store` 只接受本商店的 `runtime`；技能、插件、MCP 之间的依赖分别走 `depends.skills` / `depends.mcp`，不能混写成 `depends.store`。安装计划按 `(id, version)` 对共享依赖去重，同一个依赖只展开一次；不同版本仍会同时出现，商店不做跨分支的版本统一。
+
 ---
 
 ## 4. 产品范式
@@ -637,7 +639,7 @@ PUT 地址一次性、短时有效、只能写这一份制品。MCP 工具结果
 
 1. `depends.store`：对每个依赖按 `platform` 做 `resolve`，选中版本后 `download` 该平台资产 + `place_bin`。该版本没有这个平台 → 计划失败，规则 `PLATFORM_MISMATCH`。
 2. `depends.external`：每项一条 `ensure_bin`。
-3. `depends.skills`、`depends.mcp`：每项递归展开成具体步骤（检测环，`DEP_CYCLE`），不发出 `ensure_product` 标记。
+3. `depends.skills`、`depends.mcp`：每项递归展开成具体步骤（检测环，`DEP_CYCLE`），同一 `(id, version)` 只展开一次，不发出 `ensure_product` 标记。
 4. 本包若有 MCP：`mcp_add`。
 5. 本包若有技能：`download` + `unpack`。
 6. `secrets`：每项一条 `need_secret`。

@@ -89,7 +89,10 @@ def install_plan(
     platform: str,
     base_url: str,
     _stack: tuple[str, ...] = (),
+    _seen: set[tuple[str, str]] | None = None,
 ) -> dict:
+    if _seen is None:
+        _seen = set()
     requested = (version or "").strip()
     if not requested or SEMVER.match(requested) is None or " " in requested or requested.startswith((">", "<", "=")):
         raise PlanError("VERSION_REQUIRED", "install_plan 必须传入精确版本，不能省略或写范围")
@@ -109,7 +112,7 @@ def install_plan(
     depends = found["manifest"].get("depends") or {}
     steps: list[dict] = []
     for dep in depends.get("store") or []:
-        steps.extend(_runtime_dependency(releases, dep, client, platform, base_url))
+        steps.extend(_runtime_dependency(releases, dep, client, platform, base_url, _seen))
     for dep in depends.get("external") or []:
         steps.append({
             "op": "ensure_bin",
@@ -121,7 +124,7 @@ def install_plan(
     for key, kind in (("skills", "skill"), ("mcp", "mcp")):
         for dep in depends.get(key) or []:
             steps.extend(_product_dependency(
-                releases, dep, kind, client, platform, base_url, stack,
+                releases, dep, kind, client, platform, base_url, stack, _seen,
             ))
     if found["manifest"].get("kind") in {"mcp", "mcp+skill"}:
         steps.append(_mcp_add(found))
@@ -156,6 +159,7 @@ def _runtime_dependency(
     client: str,
     platform: str,
     base_url: str,
+    seen: set[tuple[str, str]],
 ) -> list[dict]:
     dep_id = str(dep.get("id") or "")
     expr = str(dep.get("version") or dep.get("version_range") or "*")
@@ -165,9 +169,14 @@ def _runtime_dependency(
             chosen["rule"] or "PLATFORM_MISMATCH",
             f"依赖 {dep_id} 没有适用于 {platform} 的已发布版本",
         )
-    release = _by_version(releases, dep_id, chosen["selected"]["version"])
+    selected = chosen["selected"]["version"]
+    release = _by_version(releases, dep_id, selected)
     if release["manifest"].get("kind") != "runtime":
         raise PlanError("DEP_STORE_UNPUBLISHED", f"{dep_id} 不是已发布的 runtime")
+    key = (dep_id, selected)
+    if key in seen:
+        return []
+    seen.add(key)
     return _runtime_steps(release, platform, base_url)
 
 
@@ -179,6 +188,7 @@ def _product_dependency(
     platform: str,
     base_url: str,
     stack: tuple[str, ...],
+    seen: set[tuple[str, str]],
 ) -> list[dict]:
     dep_id = str(dep.get("id") or "")
     expr = str(dep.get("version") or dep.get("version_range") or "*")
@@ -186,6 +196,13 @@ def _product_dependency(
     if not chosen["selected"]:
         raise PlanError(chosen["rule"] or "VERSION_UNAVAILABLE", f"依赖 {dep_id} 没有可安装的已发布版本")
     selected = chosen["selected"]["version"]
+    release = _by_version(releases, dep_id, selected)
+    if release["manifest"].get("kind") != kind:
+        raise PlanError("DEP_STORE_UNPUBLISHED", f"{dep_id}@{selected} 不是 {kind}")
+    key = (dep_id, selected)
+    if key in seen:
+        return []
+    seen.add(key)
     nested = install_plan(
         releases,
         package_id=dep_id,
@@ -194,9 +211,8 @@ def _product_dependency(
         platform=platform,
         base_url=base_url,
         _stack=stack,
+        _seen=seen,
     )
-    if nested["kind"] != kind:
-        raise PlanError("DEP_STORE_UNPUBLISHED", f"{dep_id}@{selected} 不是 {kind}")
     # 依赖在计划里直接展开成具体步骤。不再额外发一个 `ensure_product` 标记：
     # 它会和后面的步骤重复，外部安装器按标记再装一遍就是装两次。
     return list(nested["steps"])

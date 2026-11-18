@@ -114,6 +114,31 @@ class ResolveTests(unittest.TestCase):
             )
         self.assertEqual(caught.exception.rule, "VERSION_REQUIRED")
 
+    def test_shared_dependency_is_expanded_once(self) -> None:
+        base = _release("luxi.base", "1.0.0", ["any"])
+        left = _release("luxi.left", "1.0.0", ["any"])
+        right = _release("luxi.right", "1.0.0", ["any"])
+        shared = _release("luxi.shared", "1.0.0", ["any"])
+        base["manifest"]["depends"]["skills"] = [
+            {"id": "luxi.left", "version": "*"},
+            {"id": "luxi.right", "version": "*"},
+        ]
+        left["manifest"]["depends"]["skills"] = [{"id": "luxi.shared", "version": "*"}]
+        right["manifest"]["depends"]["skills"] = [{"id": "luxi.shared", "version": "*"}]
+        plan = install_plan(
+            [base, left, right, shared],
+            package_id="luxi.base",
+            version="1.0.0",
+            client="reasonix",
+            platform="darwin-arm64",
+            base_url=BASE,
+        )
+        ops = [step["op"] for step in plan["steps"]]
+        self.assertEqual(ops.count("download"), 4)
+        self.assertEqual(ops.count("unpack"), 4)
+        self.assertEqual(ops.count("verify"), 4)
+        self.assertEqual([step["id"] for step in plan["steps"] if step["op"] == "verify"].count("luxi.shared"), 1)
+
     def test_dependency_cycle(self) -> None:
         left = _release("luxi.gov-writer", "1.0.0", ["any"])
         right = _release("luxi.qc-cluster", "1.0.0", ["any"])
