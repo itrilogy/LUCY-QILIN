@@ -1,6 +1,6 @@
-# 运行时数据：真实账号、会话、制品。不进版本库。
-var/
-*.db
+# 运行时数据：账号凭证与冗余备份不进版本库；开放 var/blobs/、var/qilin.db、var/archive/
+var/accounts/
+var/backups/
 *.db-wal
 *.db-shm
 *.sqlite

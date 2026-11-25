@@ -24,7 +24,6 @@ from store.views import (
     _compute_file_diffs,
     _public,
     _read_archive_preview,
-    _read_artifact,
     public_view,
 )
 
