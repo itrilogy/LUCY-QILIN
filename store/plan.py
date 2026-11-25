@@ -6,6 +6,7 @@ from store.semver import SEMVER, cmp as _cmp, key as _version_key
 from store.semver import satisfies as _satisfies
 from store.validator.knowledge import resolve_knowledge_tree_path
 from store.validator.registry import CLIENTS, PLATFORMS
+from store.validator.validate import _is_bundle_script_arg
 
 OPS = (
     "download",
@@ -126,15 +127,18 @@ def install_plan(
             steps.extend(_product_dependency(
                 releases, dep, kind, client, platform, base_url, stack, _seen,
             ))
-    if found["manifest"].get("kind") in {"mcp", "mcp+skill"}:
+    kind_name = found["manifest"].get("kind")
+    if kind_name == "mcp" and found.get("artifact_sha256"):
+        steps.extend(_archive_steps(found, base_url, "MCP_DIR"))
+    if kind_name in {"mcp", "mcp+skill"}:
         steps.append(_mcp_add(found))
-    if found["manifest"].get("kind") in {"skill", "mcp+skill"}:
+    if kind_name in {"skill", "mcp+skill"}:
         steps.extend(_archive_steps(found, base_url, "SKILLS_ROOT"))
-    if found["manifest"].get("kind") == "knowledge":
+    if kind_name == "knowledge":
         steps.extend(_archive_steps(found, base_url, "KNOWLEDGE_ROOT"))
-    if found["manifest"].get("kind") == "runtime":
+    if kind_name == "runtime":
         steps.extend(_runtime_steps(found, platform, base_url))
-    if found["manifest"].get("kind") == "plugin":
+    if kind_name == "plugin":
         steps.extend(_plugin_steps(found, base_url))
     for item in found["manifest"].get("secrets") or []:
         steps.append({
@@ -143,7 +147,7 @@ def install_plan(
             "description": item.get("description") or "",
         })
     steps.append(_verify_step(found, package_id, requested))
-    return {
+    plan = {
         "id": package_id,
         "version": requested,
         "kind": found["manifest"].get("kind"),
@@ -151,6 +155,18 @@ def install_plan(
         "platform": platform,
         "steps": steps,
     }
+    if found["manifest"].get("kind") == "knowledge":
+        # 安装器只执行 steps；post_install 交给 AI 客户端判断本机有没有知识包管理插件。
+        plan["post_install"] = [{
+            "op": "knowledge_intake",
+            "id": package_id,
+            "version": requested,
+            "path": f"${{KNOWLEDGE_ROOT}}/{package_id}/{requested}",
+            "tool": "knowledge_intake",
+            "skill": "zhilin-intake",
+            "required": False,
+        }]
+    return plan
 
 
 def _runtime_dependency(
@@ -326,16 +342,23 @@ def _verify_step(release: dict, package_id: str, version: str) -> dict:
     step["transport"] = block.get("transport")
     if block.get("transport") == "stdio":
         step["command"] = block.get("command")
-        step["args"] = list(block.get("args") or [])
+        raw_args = list(block.get("args") or [])
+        if kind == "mcp" and release.get("artifact_sha256"):
+            bundle_root = f"${{MCP_DIR}}/{package_id}/{version}"
+            step["args"] = [_resolve_mcp_arg(arg, bundle_root) for arg in raw_args]
+            step["cwd"] = bundle_root
+        else:
+            step["args"] = raw_args
     else:
         step["url"] = block.get("url")
     return step
 
 
 def _mcp_add(release: dict) -> dict:
-    block = release["manifest"].get("mcp") or {}
-    names = [item.get("name") for item in release["manifest"].get("secrets") or [] if isinstance(item, dict)]
-    step = {
+    manifest = release["manifest"]
+    block = manifest.get("mcp") or {}
+    names = [item.get("name") for item in manifest.get("secrets") or [] if isinstance(item, dict)]
+    step: dict = {
         "op": "mcp_add",
         "id": release["id"],
         "transport": block.get("transport"),
@@ -343,10 +366,23 @@ def _mcp_add(release: dict) -> dict:
     }
     if block.get("transport") == "stdio":
         step["command"] = block.get("command")
-        step["args"] = block.get("args") or []
+        raw_args = list(block.get("args") or [])
+        if manifest.get("kind") == "mcp" and release.get("artifact_sha256"):
+            bundle_root = f"${{MCP_DIR}}/{release['id']}/{release['version']}"
+            step["args"] = [_resolve_mcp_arg(arg, bundle_root) for arg in raw_args]
+            step["cwd"] = bundle_root
+        else:
+            step["args"] = raw_args
     else:
         step["url"] = block.get("url")
     return step
+
+
+def _resolve_mcp_arg(arg: object, bundle_root: str) -> object:
+    if isinstance(arg, str) and _is_bundle_script_arg(arg):
+        clean = arg.strip().replace("\\", "/").lstrip("./")
+        return f"{bundle_root}/{clean}"
+    return arg
 
 
 def _artifact_url(base_url: str, package_id: str, version: str, platform: str | None) -> str:

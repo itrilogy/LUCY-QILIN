@@ -90,8 +90,10 @@ class CatalogIndexTests(unittest.TestCase):
         rel = self.store._db.execute(
             "SELECT artifact_path FROM releases WHERE package_id = 'luxi.newer'"
         ).fetchone()
-        self.assertIn("releases", Path(rel["artifact_path"]).parts)
-        self.assertTrue(Path(rel["artifact_path"]).is_file())
+        self.assertTrue(str(rel["artifact_path"]).startswith("releases/"))
+        resolved = self.store.resolve_blob_path(rel["artifact_path"])
+        assert resolved is not None
+        self.assertTrue(resolved.is_file())
         self.store._db.commit()
         self.store.close()
         reopened = Store(self.db, self.blobs)

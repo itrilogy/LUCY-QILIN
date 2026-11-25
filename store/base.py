@@ -15,10 +15,36 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from store.diagnostics import storage_warning
 from store.errors import Principal, StoreError
+from store.safety import PathEscape, check_relative, safe_join
+from store.states import SUBMISSION, VALIDATING, advance
 from store.validator.validate import Release
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+_BLOB_SUBDIRS = frozenset({"releases", "uploads", "submissions", "assets"})
+
+
+def _extract_blob_key(raw: str | None) -> str | None:
+    """将数据库中的物理路径（如 var/blobs/... 或 /var/lib/qilin/blobs/...）提取为相对 blob_dir 的逻辑键。"""
+    if not raw or not isinstance(raw, str):
+        return None
+    clean = raw.strip().replace("\\", "/")
+    if not clean or clean == ".":
+        return None
+    parts = [part for part in clean.split("/") if part and part != "."]
+    if not parts or ".." in parts:
+        return None
+    if not clean.startswith("/") and parts[0] in _BLOB_SUBDIRS:
+        return "/".join(parts)
+    # 倒序寻找最后一个 blobs 目录段或已知顶级子目录段
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx] == "blobs" and idx + 1 < len(parts) and parts[idx + 1] in _BLOB_SUBDIRS:
+            return "/".join(parts[idx + 1 :])
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx] in _BLOB_SUBDIRS and idx + 1 < len(parts):
+            return "/".join(parts[idx:])
+    return None
 _MAX_BYTES = 32 * 1024 * 1024
 _UPLOAD_TTL_HOURS = 72
 _RETRYABLE_URLS = frozenset({"DEP_EXTERNAL_UNREACHABLE"})
@@ -54,6 +80,7 @@ class StoreBase:
         self._closed = False
         self._shared_memory = str(db_path) == ":memory:"
         self._local = threading.local()
+        self._local.pending_prefix = None
         self._main_db = self._connect(db_path)
         # 主线程（含迁移与测试）复用主连接，避免多开一条。
         self._local.db = self._main_db
@@ -192,6 +219,23 @@ class StoreBase:
               refreshing INTEGER NOT NULL DEFAULT 0,
               expires_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS reports (
+              id TEXT PRIMARY KEY,
+              package_id TEXT NOT NULL,
+              version TEXT NOT NULL,
+              category TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'open',
+              summary TEXT NOT NULL,
+              steps TEXT NOT NULL DEFAULT '',
+              client TEXT NOT NULL DEFAULT '',
+              platform TEXT NOT NULL DEFAULT '',
+              contact TEXT NOT NULL DEFAULT '',
+              reporter_id TEXT,
+              resolution TEXT NOT NULL DEFAULT '',
+              triaged_by TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         self._fts_ready = self._enable_fts()
@@ -203,26 +247,94 @@ class StoreBase:
             CREATE INDEX IF NOT EXISTS upload_tickets_submission ON upload_tickets (submission_id);
             CREATE INDEX IF NOT EXISTS audit_package ON audit (package_id, id);
             CREATE INDEX IF NOT EXISTS catalog_kind ON catalog_index (kind, package_id);
+            CREATE INDEX IF NOT EXISTS reports_package ON reports (package_id, version, status);
+            CREATE INDEX IF NOT EXISTS reports_reporter ON reports (reporter_id, created_at);
+            CREATE INDEX IF NOT EXISTS reports_status ON reports (status, created_at);
             """
         )
         self._migrate_schema()
         self._rebuild_catalog_index()
         # 启动时恢复上次异常退出残留的 validating，并清理过期上传。
-        self._db.execute("UPDATE submissions SET status = 'uploading' WHERE status = 'validating'")
+        self._db.execute(
+            "UPDATE submissions SET status = ? WHERE status = ?",
+            (advance(VALIDATING, "recover", SUBMISSION, "恢复残留状态"), VALIDATING),
+        )
         self._db.commit()
         self._prune_stale_uploads(max_age_hours=_UPLOAD_TTL_HOURS, now=None)
 
     def _migrate_schema(self) -> None:
-        """按 PRAGMA user_version 执行结构迁移；存量旧库从 0 升级到 _SCHEMA_VERSION。"""
+        """按 PRAGMA user_version 执行结构迁移；存量旧库升级到 _SCHEMA_VERSION，并自愈制品逻辑路径。"""
         version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
         if version < 1:
             self._migrate_accounts()
-            self._backfill_owners()
+        self._backfill_owners()
+        self._normalize_blob_paths()
+        if version < _SCHEMA_VERSION:
             self._db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-            self._db.commit()
-        else:
-            # 即使库版本已是最新，仍保证历史数据补填幂等。
-            self._backfill_owners()
+        self._db.commit()
+
+    def to_blob_key(self, path: Path | str) -> str:
+        """把位于 blob_dir 下的文件路径转为相对逻辑键（如 releases/<id>/<version>.zip）。"""
+        if isinstance(path, Path):
+            try:
+                rel = path.resolve().relative_to(self.blob_dir.resolve()).as_posix()
+                return check_relative(rel)
+            except (ValueError, PathEscape):
+                pass
+        extracted = _extract_blob_key(str(path))
+        if extracted:
+            return check_relative(extracted)
+        return check_relative(str(path))
+
+    def resolve_blob_path(self, stored: str | None, *, fallback_rel: str | None = None) -> Path | None:
+        """把数据库存储的逻辑键或历史物理路径解析为当前 blob_dir 下的实际路径。"""
+        if stored:
+            key = _extract_blob_key(stored)
+            if key:
+                try:
+                    candidate = safe_join(self.blob_dir, key)
+                    if candidate.exists():
+                        return candidate
+                    raw_path = Path(stored)
+                    if raw_path.is_absolute() and raw_path.exists():
+                        return raw_path
+                    return candidate
+                except PathEscape:
+                    pass
+            raw_path = Path(stored)
+            if raw_path.is_absolute():
+                return raw_path
+        if fallback_rel:
+            try:
+                return safe_join(self.blob_dir, fallback_rel)
+            except PathEscape:
+                return None
+        return None
+
+    def _normalize_blob_paths(self) -> int:
+        """幂等重写五张表中的历史相对/绝对物理路径为相对 blob_dir 的逻辑键。"""
+        specs = (
+            ("releases", ("package_id", "version"), "artifact_path"),
+            ("release_assets", ("package_id", "version", "platform"), "path"),
+            ("submissions", ("id",), "artifact_path"),
+            ("submission_assets", ("submission_id", "platform"), "path"),
+            ("revisions", ("submission_id",), "artifact_path"),
+        )
+        updated = 0
+        for table, pk_cols, col in specs:
+            select_cols = ", ".join((*pk_cols, col))
+            rows = self._db.execute(
+                f"SELECT {select_cols} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''"
+            ).fetchall()
+            where = " AND ".join(f"{pk} = ?" for pk in pk_cols)
+            for row in rows:
+                current = str(row[col])
+                key = _extract_blob_key(current)
+                if key and key != current:
+                    params = (key, *(row[pk] for pk in pk_cols))
+                    self._db.execute(f"UPDATE {table} SET {col} = ? WHERE {where}", params)
+                    updated += 1
+        return updated
     def _migrate_accounts(self) -> None:
         cols = {row["name"] for row in self._db.execute("PRAGMA table_info(accounts)")}
         for name in ("real_name", "nickname", "department", "job_title"):
@@ -251,14 +363,49 @@ class StoreBase:
         )
         self._db.commit()
     def health(self) -> dict:
-        """就绪检查：数据库可读、制品目录可写。不返回路径与错误原文。"""
+        """就绪检查：数据库可读、制品目录可写、在架制品可读。不返回路径与错误原文。"""
+        missing_count = 0
         try:
             with self._read():
                 self._db.execute("SELECT 1").fetchone()
+                rows = self._db.execute(
+                    """
+                    SELECT package_id, version, manifest_json, artifact_path
+                    FROM releases WHERE unpublished_at IS NULL
+                    """
+                ).fetchall()
+                assets = self._db.execute(
+                    """
+                    SELECT ra.package_id, ra.version, ra.platform, ra.path
+                    FROM release_assets ra
+                    JOIN releases r ON r.package_id = ra.package_id AND r.version = ra.version
+                    WHERE r.unpublished_at IS NULL
+                    """
+                ).fetchall()
             database = "ok"
+            for row in rows:
+                manifest = json.loads(row["manifest_json"])
+                kind = manifest.get("kind")
+                if kind in {"skill", "mcp+skill", "knowledge", "plugin"} or (
+                    kind == "mcp" and row["artifact_path"]
+                ):
+                    fallback = f"releases/{row['package_id']}/{row['version']}.zip"
+                    target = self.resolve_blob_path(row["artifact_path"], fallback_rel=fallback)
+                    if target is None or not target.is_file():
+                        missing_count += 1
+            for asset in assets:
+                target = self.resolve_blob_path(asset["path"])
+                if target is None or not target.is_file():
+                    missing_count += 1
         except Exception:  # noqa: BLE001 - 健康检查不能把内部异常抛给探针
             database = "unavailable"
-        blobs = "ok" if self.blob_dir.is_dir() and os.access(self.blob_dir, os.W_OK) else "unavailable"
+        if not (self.blob_dir.is_dir() and os.access(self.blob_dir, os.W_OK)):
+            blobs = "unavailable"
+        elif missing_count > 0:
+            blobs = "missing_artifacts"
+            storage_warning(f"health check detected {missing_count} missing release artifact(s)")
+        else:
+            blobs = "ok"
         return {
             "status": "ok" if database == "ok" and blobs == "ok" else "degraded",
             "database": database,
@@ -354,6 +501,27 @@ class StoreBase:
         with self._lock:
             yield
 
+    def _flush_prefix_backfill(self) -> None:
+        """把读路径上发现的旧库 KEY 指纹补上。
+
+        读事务里不能写（会撞 `SQLITE_BUSY_SNAPSHOT`），所以 `_account_from_key`
+        只把命中的旧行记在线程本地，事务结束后在这里补一次。
+        """
+        pending = getattr(self._local, "pending_prefix", None)
+        if not pending or self._db.in_transaction:
+            return
+        self._local.pending_prefix = None
+        account_id, fingerprint = pending
+        try:
+            self._db.execute(
+                "UPDATE accounts SET key_prefix = ? WHERE id = ? AND (key_prefix IS NULL OR key_prefix = '')",
+                (fingerprint, account_id),
+            )
+            self._db.commit()
+        except sqlite3.OperationalError:
+            # 补指纹只是加速；失败了下次还会走兜底分支，不影响正确性。
+            pass
+
     def close(self) -> None:
         with self._lock:
             db = getattr(self._local, "db", None)
@@ -367,7 +535,9 @@ class StoreBase:
     def _require(self, token: str, roles: set[str]) -> Principal:
         principal = self._principal_from_token(token)
         if principal is None:
-            raise StoreError("ROLE_FORBIDDEN", "请先登录。")
+            # 没登录 / 凭据无效是 401，跟"登录了但角色不够"（403）分开：
+            # 客户端才知道该重开登录，还是只说一句权限不够。
+            raise StoreError("AUTH_REQUIRED", "请先登录。")
         if principal.role not in roles:
             raise StoreError("ROLE_FORBIDDEN", "当前身份不能做这件事。")
         return principal
@@ -376,7 +546,7 @@ class StoreBase:
             "SELECT * FROM submissions WHERE id = ?", (submission_id,)
         ).fetchone()
         if row is None:
-            raise StoreError("VERSION_UNAVAILABLE", "没有这条例提交")
+            raise StoreError("RESOURCE_NOT_FOUND", "没有这条提交")
         return row
     def _audit(
         self,
@@ -385,7 +555,14 @@ class StoreBase:
         package_id: str | None,
         version: str | None,
         channel: str = "service",
+        *,
+        commit: bool = True,
     ) -> None:
+        """写一条审计。`commit=False` 交给调用方与业务写入同一个事务提交。
+
+        发布这类"要么全成、要么全不成"的操作，审计必须和 releases/index/状态
+        在同一个事务里，否则会出现"发布了但没有审计"（评审 P2-2/P2-3）。
+        """
         self._db.execute(
             """
             INSERT INTO audit (actor, action, package_id, version, channel)
@@ -393,7 +570,8 @@ class StoreBase:
             """,
             (actor, action, package_id, version, channel),
         )
-        self._db.commit()
+        if commit:
+            self._db.commit()
     def _releases(self) -> list[Release]:
         rows = self._db.execute(
             """

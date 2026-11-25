@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+AUTHENTICATED_ROLES = frozenset({"member", "publisher", "reviewer", "admin"})
 PUBLISHER_ROLES = frozenset({"publisher", "reviewer", "admin"})
 REVIEW_ROLES = frozenset({"reviewer", "admin"})
 ADMIN_ROLES = frozenset({"admin"})

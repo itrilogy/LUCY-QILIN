@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Callable
 
 from store.base import _MAX_BYTES, _RETRYABLE_URLS, _UPLOAD_TTL_HOURS
-from store.blobs import safe_extract, sha256_file, write_zip
+from store.blobs import atomic_copy, atomic_write, safe_extract, sha256_file, write_zip
 from store.errors import Principal, StoreError
 from store.roles import ADMIN_ROLES, PUBLISHER_ROLES
 from store.models import SubmitResult
 from store.safety import PathEscape, safe_join
 from store.semver import cmp as _cmp
-from store.states import SUBMISSION, advance
+from store.states import SUBMISSION, UPLOADING, VALIDATING, advance
 from store.validator.validate import validate_manifest, validate_path
 from store.views import _check_add_platform, _diff, _findings, _write_tree, review_view
 
@@ -31,6 +31,21 @@ _UPLOAD_TICKET_TTL = 3600
 def _namespace_of(package_id: str) -> str:
     """`a.b.c` 的命名空间是第一个点之前的 `a`。"""
     return package_id.split(".", 1)[0]
+
+
+def _has_payload_files(root: Path) -> bool:
+    """判断目录中除 manifest.json 与系统忽略文件外，是否还有实际随包文件。"""
+    from store.blobs import is_ignored_path, load_storeignore
+
+    ignore_patterns = load_storeignore(root)
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel == "manifest.json" or is_ignored_path(rel, ignore_patterns):
+            continue
+        return True
+    return False
 
 
 class SubmissionMixin:
@@ -55,7 +70,8 @@ class SubmissionMixin:
             _write_tree(root, files, stored)
             report = validate_path(root, releases=releases)
             archive = digest = None
-            if report.ok:
+            has_payload = _has_payload_files(root)
+            if report.ok and (stored.get("kind") != "mcp" or has_payload):
                 archive = self.blob_dir / "submissions" / f"{submission_id}.zip"
                 digest = write_zip(root, archive)
             with self._lock:
@@ -103,12 +119,23 @@ class SubmissionMixin:
             submission_id, stored, publisher.id, "uploading", report, submit_kind, None, None, byte_size,
         )
         self._audit(publisher.id, "begin_submit", stored.get("id"), stored.get("version"), channel)
+        if stored.get("kind") == "mcp" and byte_size == 0:
+            return {
+                "submission_id": submission_id,
+                "status": "uploading",
+                "rules": [],
+                "put_path": None,
+                "upload_path": None,
+                "upload_ticket": None,
+            }
         ticket = self._new_upload_ticket(submission_id, publisher.id, "submit")
         return {
             "submission_id": submission_id,
             "status": "uploading",
             "rules": [],
             "put_path": f"/v1/uploads/{submission_id}?ticket={ticket}",
+            "upload_path": f"/v1/uploads/{submission_id}",
+            "upload_ticket": ticket,
         }
     def _new_upload_ticket(self, submission_id: str, account_id: str, scope: str) -> str:
         """生成一次性上传票据；只存哈希，不把票据写进日志。"""
@@ -157,17 +184,16 @@ class SubmissionMixin:
         if actor_role != "admin" and row["publisher_id"] != actor_id:
             raise StoreError("ROLE_FORBIDDEN", "不能上传别人的制品")
         if row["status"] != "uploading" or row["artifact_path"]:
-            raise StoreError("VERSION_UNAVAILABLE", "这个上传地址已经用过")
+            raise StoreError("SUBMISSION_STATE_INVALID", "这个上传地址已经用过")
         if row["byte_size"] is not None and len(data) != row["byte_size"]:
             raise StoreError("CHECKSUM", "制品大小与申报不一致")
         if len(data) > _MAX_BYTES:
             raise StoreError("CHECKSUM", "制品大小不在允许范围内")
         dest = self.blob_dir / "uploads" / f"{submission_id}.zip"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
+        atomic_write(dest, data)
         self._db.execute(
             "UPDATE submissions SET artifact_path = ?, artifact_sha256 = ? WHERE id = ?",
-            (str(dest), hashlib.sha256(data).hexdigest(), submission_id),
+            (self.to_blob_key(dest), hashlib.sha256(data).hexdigest(), submission_id),
         )
         self._db.commit()
     def finish_submit(
@@ -186,22 +212,26 @@ class SubmissionMixin:
         row = self._submission(submission_id)
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能完成别人的提交")
-        if row["status"] != "uploading":
-            raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
-        if not row["artifact_path"]:
+        if row["status"] != UPLOADING:
+            raise StoreError("SUBMISSION_STATE_INVALID", "这条提交不在等待制品")
+        manifest = json.loads(row["manifest_json"])
+        pure_mcp_no_zip = manifest.get("kind") == "mcp" and not row["artifact_path"] and (row["byte_size"] or 0) == 0
+        if not row["artifact_path"] and not pure_mcp_no_zip:
             raise StoreError("CHECKSUM", "还没有上传制品")
+        next_status = advance(row["status"], "start_validating", SUBMISSION, "这条提交不在等待制品")
         self._db.execute(
-            "UPDATE submissions SET status = 'validating' WHERE id = ? AND status = 'uploading'",
-            (submission_id,),
+            "UPDATE submissions SET status = ? WHERE id = ? AND status = ?",
+            (next_status, submission_id, UPLOADING),
         )
         self._db.commit()
+        archive = self.resolve_blob_path(row["artifact_path"]) if row["artifact_path"] else None
         return {
             "actor": principal.id,
             "submission_id": submission_id,
             "package_id": row["package_id"],
             "version": row["version"],
             "manifest_json": row["manifest_json"],
-            "archive": Path(row["artifact_path"]),
+            "archive": archive,
             "releases": self._releases(),
         }
     def _finish_checked(
@@ -212,22 +242,27 @@ class SubmissionMixin:
         probe: Callable[[str], int | None] | None,
     ) -> SubmitResult:
         submission_id = ready["submission_id"]
-        archive: Path = ready["archive"]
+        archive: Path | None = ready["archive"]
         stored = json.loads(ready["manifest_json"])
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                try:
-                    safe_extract(archive, root)
-                except (zipfile.BadZipFile, ValueError, OSError):
-                    with self._lock:
-                        self._finish_reject_archive(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
-                    return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
+                if archive is not None:
+                    try:
+                        safe_extract(archive, root)
+                    except (zipfile.BadZipFile, ValueError, OSError):
+                        with self._lock:
+                            self._finish_reject_archive(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
+                        return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
                 (root / "manifest.json").write_text(ready["manifest_json"], encoding="utf-8")
                 report = validate_path(
                     root, releases=ready["releases"], check_urls=True, probe=probe,
                 )
                 if report.ok:
+                    if stored.get("kind") == "mcp" and archive is not None and not _has_payload_files(root):
+                        archive.unlink(missing_ok=True)
+                        ready["archive"] = None
+                        ready["drop_empty_mcp_zip"] = True
                     with self._lock:
                         self._finish_commit(
                             ready, "pending", report, channel=channel, keep_assets=root, stored=stored,
@@ -241,15 +276,15 @@ class SubmissionMixin:
         except Exception:
             with self._lock:
                 self._db.execute(
-                    "UPDATE submissions SET status = 'uploading' WHERE id = ? AND status = 'validating'",
-                    (submission_id,),
+                    "UPDATE submissions SET status = ? WHERE id = ? AND status = ?",
+                    (advance(VALIDATING, "recover", SUBMISSION, "恢复残留状态"), submission_id, VALIDATING),
                 )
                 self._db.commit()
             raise
     def _finish_reject_archive(self, submission_id: str, lines: list[str]) -> None:
         row = self._submission(submission_id)
         if row["status"] not in {"uploading", "validating"}:
-            raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
+            raise StoreError("SUBMISSION_STATE_INVALID", "这条提交不在等待制品")
         self._reject_upload(row, lines)
     def _finish_commit(
         self,
@@ -263,27 +298,52 @@ class SubmissionMixin:
     ) -> None:
         row = self._submission(ready["submission_id"])
         if row["status"] not in {"uploading", "validating"}:
-            raise StoreError("VERSION_UNAVAILABLE", "这条例提交不在等待制品")
-        archive: Path = ready["archive"]
-        if keep_assets is not None and stored is not None:
-            self._keep_assets(ready["submission_id"], keep_assets, stored)
+            raise StoreError("SUBMISSION_STATE_INVALID", "这条提交不在等待制品")
+        archive: Path | None = ready["archive"]
         drop = status == "rejected"
-        if drop:
-            archive.unlink(missing_ok=True)
-        self._db.execute(
-            """
-            UPDATE submissions
-            SET status = ?, validation_json = ?, artifact_path = ?
-            WHERE id = ?
-            """,
-            (
-                status,
-                json.dumps([item.line() for item in report.findings], ensure_ascii=False),
-                None if drop else str(archive),
-                ready["submission_id"],
-            ),
-        )
-        self._audit(ready["actor"], "finish_submit", ready["package_id"], ready["version"], channel)
+        try:
+            if keep_assets is not None and stored is not None:
+                self._keep_assets(ready["submission_id"], keep_assets, stored)
+            if drop and archive is not None:
+                archive.unlink(missing_ok=True)
+            stored_key = None if (drop or archive is None) else self.to_blob_key(archive)
+            if ready.get("drop_empty_mcp_zip") or (drop and archive is not None):
+                self._db.execute(
+                    """
+                    UPDATE submissions
+                    SET status = ?, validation_json = ?, artifact_path = ?, artifact_sha256 = NULL
+                    WHERE id = ?
+                    """,
+                    (
+                        status,
+                        json.dumps([item.line() for item in report.findings], ensure_ascii=False),
+                        stored_key,
+                        ready["submission_id"],
+                    ),
+                )
+            else:
+                self._db.execute(
+                    """
+                    UPDATE submissions
+                    SET status = ?, validation_json = ?, artifact_path = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        status,
+                        json.dumps([item.line() for item in report.findings], ensure_ascii=False),
+                        stored_key,
+                        ready["submission_id"],
+                    ),
+                )
+            # 与会话/资产同一个事务：审计失败就把状态一起退回去，不留半成品。
+            self._audit(
+                ready["actor"], "finish_submit", ready["package_id"], ready["version"],
+                channel, commit=False,
+            )
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
     def prune_stale_uploads(self, *, max_age_hours: int | None = None, now: int | None = None) -> int:
         """清掉停在 `uploading` 且已过期的提交，返回清掉的条数。
 
@@ -302,7 +362,7 @@ class SubmissionMixin:
         # 这里用同样的函数在 SQL 里比，避免 Python 侧时区换算出错。
         rows = self._db.execute(
             """
-            SELECT id, artifact_path FROM submissions
+            SELECT id, status, artifact_path FROM submissions
             WHERE status IN ('uploading', 'validating')
               AND CAST(strftime('%s', created_at) AS INTEGER) < ?
             """,
@@ -310,10 +370,12 @@ class SubmissionMixin:
         ).fetchall()
         for row in rows:
             if row["artifact_path"]:
-                Path(row["artifact_path"]).unlink(missing_ok=True)
+                target = self.resolve_blob_path(row["artifact_path"])
+                if target is not None:
+                    target.unlink(missing_ok=True)
             self._db.execute(
-                "UPDATE submissions SET status = 'expired', artifact_path = NULL WHERE id = ?",
-                (row["id"],),
+                "UPDATE submissions SET status = ?, artifact_path = NULL WHERE id = ?",
+                (advance(row["status"], "expire", SUBMISSION, "清理残留上传"), row["id"]),
             )
         # 修订停在 begin_revise / PUT 之后也会占着一份 zip，按同一 TTL 清掉。
         revisions = self._db.execute(
@@ -325,7 +387,9 @@ class SubmissionMixin:
         ).fetchall()
         for revision in revisions:
             if revision["artifact_path"]:
-                Path(revision["artifact_path"]).unlink(missing_ok=True)
+                target = self.resolve_blob_path(revision["artifact_path"])
+                if target is not None:
+                    target.unlink(missing_ok=True)
             self._db.execute(
                 "DELETE FROM revisions WHERE submission_id = ?", (revision["submission_id"],)
             )
@@ -352,12 +416,38 @@ class SubmissionMixin:
             row = self._submission(submission_id)
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能撤回别人的提交")
-            advance(row["status"], "withdraw", SUBMISSION, "只能撤回待审核的提交")
+            advance(row["status"], "withdraw", SUBMISSION, "只能撤回待审核、上传中或已退回的提交")
+            files_to_remove: list[Path] = []
+            if row["artifact_path"]:
+                target = self.resolve_blob_path(row["artifact_path"])
+                if target is not None:
+                    files_to_remove.append(target)
+            asset_rows = self._db.execute(
+                "SELECT path FROM submission_assets WHERE submission_id = ?", (submission_id,)
+            ).fetchall()
+            for asset_row in asset_rows:
+                target = self.resolve_blob_path(asset_row["path"])
+                if target is not None:
+                    files_to_remove.append(target)
+            rev_row = self._db.execute(
+                "SELECT artifact_path FROM revisions WHERE submission_id = ?", (submission_id,)
+            ).fetchone()
+            if rev_row is not None and rev_row["artifact_path"]:
+                target = self.resolve_blob_path(rev_row["artifact_path"])
+                if target is not None:
+                    files_to_remove.append(target)
+            self._db.execute("DELETE FROM submission_assets WHERE submission_id = ?", (submission_id,))
+            self._db.execute("DELETE FROM revisions WHERE submission_id = ?", (submission_id,))
+            self._db.execute("DELETE FROM upload_tickets WHERE submission_id = ?", (submission_id,))
+            self._db.execute("DELETE FROM plugin_reviews WHERE submission_id = ?", (submission_id,))
             self._db.execute(
-                "UPDATE submissions SET status = 'withdrawn' WHERE id = ?", (submission_id,)
+                "UPDATE submissions SET status = 'withdrawn', artifact_path = NULL, artifact_sha256 = NULL WHERE id = ?",
+                (submission_id,),
             )
+            self._audit(principal.id, "withdraw", row["package_id"], row["version"], commit=False)
             self._db.commit()
-            self._audit(principal.id, "withdraw", row["package_id"], row["version"])
+            for file_path in files_to_remove:
+                file_path.unlink(missing_ok=True)
     def get_submission(self, token: str, submission_id: str) -> dict:
         with self._read():
             return self._get_submission(token, submission_id)
@@ -392,30 +482,38 @@ class SubmissionMixin:
         if principal.role != "admin" and row["publisher_id"] != principal.id:
             raise StoreError("ROLE_FORBIDDEN", "不能修订别人的提交")
         if row["status"] not in {"pending", "rejected"}:
-            raise StoreError("VERSION_UNAVAILABLE", "只能修订待审核或已退回的提交")
+            raise StoreError("SUBMISSION_STATE_INVALID", "只能修订待审核或已退回的提交")
         stored = self._prepare(principal, manifest, row["submit_kind"])
-        old_artifact = Path(row["artifact_path"]) if row["artifact_path"] else None
+        old_artifact = self.resolve_blob_path(row["artifact_path"]) if row["artifact_path"] else None
         new_archive: Path | None = None
         digest: str | None = None
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_tree(root, files, stored)
             report = validate_path(root, releases=self._releases())
-            if report.ok:
+            has_payload = _has_payload_files(root)
+            if report.ok and (stored.get("kind") != "mcp" or has_payload):
                 # 先写临时文件，校验和资产都成功后才替换旧制品。
                 # 旧实现先删旧 zip 再打包，打包失败会留下「库指向已删文件」。
                 new_archive = self.blob_dir / "submissions" / f"{submission_id}.new.zip"
                 digest = write_zip(root, new_archive)
-                try:
+            try:
+                # 旧的平台资产行必须先清掉，再让 `_keep_assets` 写新的：它用的是
+                # `INSERT OR REPLACE`，顺序反过来会把刚插入的行连同旧行一起删掉
+                # （runtime 修订曾因此丢掉全部平台制品）。
+                self._db.execute(
+                    "DELETE FROM submission_assets WHERE submission_id = ?", (submission_id,)
+                )
+                if report.ok and new_archive is not None:
                     self._keep_assets(submission_id, root, stored)
-                except (StoreError, OSError):
+            except (StoreError, OSError):
+                self._db.rollback()
+                if new_archive is not None:
                     new_archive.unlink(missing_ok=True)
-                    raise
+                raise
         status = "pending" if report.ok else "rejected"
+        final_dest = self.blob_dir / "submissions" / f"{submission_id}.zip"
         try:
-            self._db.execute(
-                "DELETE FROM submission_assets WHERE submission_id = ?", (submission_id,)
-            )
             self._db.execute("DELETE FROM plugin_reviews WHERE submission_id = ?", (submission_id,))
             self._db.execute(
                 """
@@ -431,7 +529,7 @@ class SubmissionMixin:
                     status,
                     json.dumps(stored, ensure_ascii=False),
                     json.dumps([item.line() for item in report.findings], ensure_ascii=False),
-                    str(self.blob_dir / "submissions" / f"{submission_id}.zip") if new_archive else None,
+                    self.to_blob_key(final_dest) if new_archive else None,
                     digest,
                     submission_id,
                 ),
@@ -443,9 +541,11 @@ class SubmissionMixin:
                 new_archive.unlink(missing_ok=True)
             raise
         if new_archive is not None:
-            new_archive.replace(self.blob_dir / "submissions" / f"{submission_id}.zip")
+            new_archive.replace(final_dest)
+            if old_artifact is not None and old_artifact.resolve() != final_dest.resolve():
+                old_artifact.unlink(missing_ok=True)
         elif old_artifact is not None:
-            # 新包不合格：库里已经不指向旧制品，再删文件；删失败只留下孤儿文件。
+            # 新包不合格或纯连接 MCP 无制品：库里已经不指向旧制品，再删文件；删失败只留下孤儿文件。
             old_artifact.unlink(missing_ok=True)
         self._audit(principal.id, "revise", stored.get("id"), stored.get("version"), channel)
         return SubmitResult(submission_id, status, report.rules())
@@ -467,7 +567,7 @@ class SubmissionMixin:
             if publisher.role != "admin" and row["publisher_id"] != publisher.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能修订别人的提交")
             if row["status"] not in {"pending", "rejected"}:
-                raise StoreError("VERSION_UNAVAILABLE", "只能修订待审核或已退回的提交")
+                raise StoreError("SUBMISSION_STATE_INVALID", "只能修订待审核或已退回的提交")
             stored = self._prepare(publisher, manifest, row["submit_kind"])
             report = validate_manifest(stored, releases=self._releases())
             if not report.ok:
@@ -491,12 +591,23 @@ class SubmissionMixin:
             )
             self._db.commit()
             self._audit(publisher.id, "begin_revise", stored.get("id"), stored.get("version"))
+            if stored.get("kind") == "mcp" and byte_size == 0:
+                return {
+                    "submission_id": submission_id,
+                    "status": "uploading",
+                    "rules": [],
+                    "put_path": None,
+                    "upload_path": None,
+                    "upload_ticket": None,
+                }
             ticket = self._new_upload_ticket(submission_id, publisher.id, "revise")
             return {
                 "submission_id": submission_id,
                 "status": "uploading",
                 "rules": [],
                 "put_path": f"/v1/uploads/revise/{submission_id}?ticket={ticket}",
+                "upload_path": f"/v1/uploads/revise/{submission_id}",
+                "upload_ticket": ticket,
             }
 
     def save_revise_upload(self, token: str, submission_id: str, data: bytes, *, ticket: str = "") -> None:
@@ -506,25 +617,24 @@ class SubmissionMixin:
             if actor_role != "admin" and row["publisher_id"] != actor_id:
                 raise StoreError("ROLE_FORBIDDEN", "不能上传别人的修订")
             if row["status"] not in {"pending", "rejected"}:
-                raise StoreError("VERSION_UNAVAILABLE", "只能修订待审核或已退回的提交")
+                raise StoreError("SUBMISSION_STATE_INVALID", "只能修订待审核或已退回的提交")
             revision = self._db.execute(
                 "SELECT byte_size, artifact_path FROM revisions WHERE submission_id = ?",
                 (submission_id,),
             ).fetchone()
             if revision is None:
-                raise StoreError("VERSION_UNAVAILABLE", "还没有开始这次修订")
+                raise StoreError("SUBMISSION_STATE_INVALID", "还没有开始这次修订")
             if revision["artifact_path"]:
-                raise StoreError("VERSION_UNAVAILABLE", "这个修订地址已经用过")
+                raise StoreError("SUBMISSION_STATE_INVALID", "这个修订地址已经用过")
             if revision["byte_size"] is not None and len(data) != revision["byte_size"]:
                 raise StoreError("CHECKSUM", "制品大小与申报不一致")
             if len(data) > _MAX_BYTES:
                 raise StoreError("CHECKSUM", "制品大小不在允许范围内")
             dest = self.blob_dir / "uploads" / f"{submission_id}.revise.zip"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
+            atomic_write(dest, data)
             self._db.execute(
                 "UPDATE revisions SET artifact_path = ? WHERE submission_id = ?",
-                (str(dest), submission_id),
+                (self.to_blob_key(dest), submission_id),
             )
             self._db.commit()
 
@@ -536,44 +646,50 @@ class SubmissionMixin:
             if principal.role != "admin" and row["publisher_id"] != principal.id:
                 raise StoreError("ROLE_FORBIDDEN", "不能完成别人的修订")
             if row["status"] not in {"pending", "rejected"}:
-                raise StoreError("VERSION_UNAVAILABLE", "只能修订待审核或已退回的提交")
+                raise StoreError("SUBMISSION_STATE_INVALID", "只能修订待审核或已退回的提交")
             revision = self._db.execute(
-                "SELECT manifest_json, artifact_path FROM revisions WHERE submission_id = ?",
+                "SELECT manifest_json, byte_size, artifact_path FROM revisions WHERE submission_id = ?",
                 (submission_id,),
             ).fetchone()
-            if revision is None or not revision["artifact_path"]:
-                raise StoreError("CHECKSUM", "还没有上传修订制品")
-            archive = Path(revision["artifact_path"])
+            if revision is None:
+                raise StoreError("CHECKSUM", "还没有开始这次修订")
             manifest = json.loads(revision["manifest_json"])
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            try:
-                safe_extract(archive, root)
-            except (zipfile.BadZipFile, ValueError, OSError):
-                with self._lock:
-                    self._reject_revision(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
-                return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
-            files = {
-                path.relative_to(root).as_posix(): path.read_bytes()
-                for path in root.rglob("*")
-                if path.is_file() and path.relative_to(root).as_posix() != "manifest.json"
-            }
+            pure_mcp_no_zip = manifest.get("kind") == "mcp" and not revision["artifact_path"] and (revision["byte_size"] or 0) == 0
+            if not revision["artifact_path"] and not pure_mcp_no_zip:
+                raise StoreError("CHECKSUM", "还没有上传修订制品")
+            archive = self.resolve_blob_path(revision["artifact_path"]) if revision["artifact_path"] else None
+        files: dict[str, bytes] = {}
+        if archive is not None:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                try:
+                    safe_extract(archive, root)
+                except (zipfile.BadZipFile, ValueError, OSError):
+                    with self._lock:
+                        self._reject_revision(submission_id, ["CHECKSUM\tartifact\t制品不是合法压缩包"])
+                    return SubmitResult(submission_id, "rejected", ["CHECKSUM"])
+                files = {
+                    path.relative_to(root).as_posix(): path.read_bytes()
+                    for path in root.rglob("*")
+                    if path.is_file() and path.relative_to(root).as_posix() != "manifest.json"
+                }
         with self._lock:
             result = self._revise(token, submission_id, manifest, files, channel="mcp")
             self._db.execute("DELETE FROM revisions WHERE submission_id = ?", (submission_id,))
             self._db.commit()
-        archive.unlink(missing_ok=True)
+        if archive is not None:
+            archive.unlink(missing_ok=True)
         return result
 
     def _reject_revision(self, submission_id: str, lines: list[str]) -> None:
         row = self._submission(submission_id)
         if row["status"] not in {"pending", "rejected"}:
-            raise StoreError("VERSION_UNAVAILABLE", "只能退回待审核或已退回的提交")
+            raise StoreError("SUBMISSION_STATE_INVALID", "只能退回待审核或已退回的提交")
         revision = self._db.execute(
             "SELECT artifact_path FROM revisions WHERE submission_id = ?", (submission_id,)
         ).fetchone()
-        old_artifact = Path(row["artifact_path"]) if row["artifact_path"] else None
-        revision_artifact = Path(revision["artifact_path"]) if revision and revision["artifact_path"] else None
+        old_artifact = self.resolve_blob_path(row["artifact_path"]) if row["artifact_path"] else None
+        revision_artifact = self.resolve_blob_path(revision["artifact_path"]) if revision and revision["artifact_path"] else None
         self._db.execute("DELETE FROM submission_assets WHERE submission_id = ?", (submission_id,))
         self._db.execute("DELETE FROM revisions WHERE submission_id = ?", (submission_id,))
         self._db.execute(
@@ -592,14 +708,30 @@ class SubmissionMixin:
 
     def check_manifest(self, token: str, manifest: dict) -> list[str]:
         return [item["rule"] for item in self.explain_manifest(token, manifest) if item["severity"] == "error"]
-    def explain_manifest(self, token: str, manifest: dict) -> list[dict]:
+    def explain_manifest(
+        self,
+        token: str,
+        manifest: dict,
+        *,
+        files: dict[str, bytes] | None = None,
+    ) -> list[dict]:
         with self._read():
             self._require(token, PUBLISHER_ROLES)
-            report = validate_manifest(manifest, releases=self._releases())
-            return [
-                {"rule": item.rule, "path": item.path, "message": item.message, "severity": item.severity}
-                for item in report.findings
-            ]
+            releases = self._releases()
+        if files is not None:
+            if not isinstance(manifest, dict):
+                report = validate_manifest(manifest, releases=releases)
+            else:
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    _write_tree(root, files, manifest)
+                    report = validate_path(root, releases=releases, check_files=True)
+        else:
+            report = validate_manifest(manifest, releases=releases)
+        return [
+            {"rule": item.rule, "path": item.path, "message": item.message, "severity": item.severity}
+            for item in report.findings
+        ]
     def _prepare(self, publisher: Principal, manifest: dict, submit_kind: str) -> dict:
         if submit_kind not in {"new_version", "add_platform"}:
             raise StoreError("KIND", "submit_kind 只能是 new_version 或 add_platform")
@@ -680,7 +812,7 @@ class SubmissionMixin:
                 json.dumps(stored, ensure_ascii=False),
                 json.dumps([item.line() for item in report.findings], ensure_ascii=False),
                 byte_size if byte_size is not None else (archive.stat().st_size if archive else None),
-                str(archive) if archive else None,
+                self.to_blob_key(archive) if archive else None,
                 digest,
             ),
         )
@@ -713,19 +845,20 @@ class SubmissionMixin:
                 raise StoreError("RUNTIME_ASSET", f"平台名不合法：{exc}") from exc
             plan.append((platform, source, dest))
         for platform, source, dest in plan:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(source.read_bytes())
+            atomic_copy(source, dest)
             self._db.execute(
                 """
                 INSERT OR REPLACE INTO submission_assets (submission_id, platform, sha256, path)
                 VALUES (?, ?, ?, ?)
                 """,
-                (submission_id, platform, sha256_file(dest), str(dest)),
+                (submission_id, platform, sha256_file(dest), self.to_blob_key(dest)),
             )
     def _reject_upload(self, row: sqlite3.Row, lines: list[str]) -> None:
         path = row["artifact_path"]
         if path:
-            Path(path).unlink(missing_ok=True)
+            target = self.resolve_blob_path(path)
+            if target is not None:
+                target.unlink(missing_ok=True)
         self._db.execute(
             """
             UPDATE submissions
@@ -809,7 +942,7 @@ class SubmissionMixin:
                 raise StoreError("ROLE_FORBIDDEN", "只能转给作者、审核或管理员。")
             owner = self._namespace_owner(namespace, persist=True)
             if owner is None:
-                raise StoreError("VERSION_UNAVAILABLE", "没有这个命名空间")
+                raise StoreError("RESOURCE_NOT_FOUND", "没有这个命名空间")
             self._db.execute(
                 "UPDATE package_owners SET publisher_id = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?",
                 (target["id"], namespace),

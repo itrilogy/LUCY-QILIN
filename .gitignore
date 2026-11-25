@@ -22,6 +22,11 @@ dist/
 .env.*
 !.env.example
 jwks-cache.json
+deploy/docker/secrets/
+
+# 容器部署的默认数据/备份落点（含数据库与制品，绝不能进版本库）
+data/
+backups/
 
 # 编辑器与系统
 .DS_Store

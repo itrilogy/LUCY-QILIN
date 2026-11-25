@@ -149,9 +149,11 @@ class HubLoginTests(unittest.TestCase):
         self.assertTrue(json.load(urllib.request.urlopen(self.base + "/v1/identity"))["login"])
 
     def test_missing_state_does_not_call_the_hub(self) -> None:
-        status, _headers, body = _no_redirect(self.base + "/auth/callback?code=ec_1")
+        status, headers, body = _no_redirect(self.base + "/auth/callback?code=ec_1")
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(body)["rule"], "IDENTITY_INVALID")
+        # 401 要带挑战头，客户端才知道该拿什么凭据重试（RFC 7235）。
+        self.assertEqual(headers.get("WWW-Authenticate"), 'Bearer realm="qilin"')
         self.assertEqual(self.calls, [])
 
     def test_near_expiry_rotates_and_a_failure_drops_the_session(self) -> None:
@@ -322,7 +324,7 @@ def _rpc(base: str, method: str, params: dict, token: str) -> dict:
     )
     with urllib.request.urlopen(request) as response:
         if method == "initialize":
-            assert response.headers.get("Mcp-Session-Id")
+            assert response.headers.get("Mcp-Session-Id") is None
         return json.load(response)
 
 

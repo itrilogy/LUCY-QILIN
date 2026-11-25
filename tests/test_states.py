@@ -14,16 +14,54 @@ from tests.test_service import SKILL, skill_manifest
 
 class TransitionTests(unittest.TestCase):
     def test_table_edges(self) -> None:
+        self.assertEqual(advance("uploading", "start_validating", SUBMISSION, "x"), "validating")
         self.assertEqual(advance("uploading", "finish_ok", SUBMISSION, "x"), "pending")
+        self.assertEqual(advance("validating", "finish_ok", SUBMISSION, "x"), "pending")
+        self.assertEqual(advance("validating", "finish_retryable", SUBMISSION, "x"), "uploading")
+        self.assertEqual(advance("validating", "finish_bad", SUBMISSION, "x"), "rejected")
+        self.assertEqual(advance("validating", "recover", SUBMISSION, "x"), "uploading")
+        self.assertEqual(advance("uploading", "expire", SUBMISSION, "x"), "expired")
+        self.assertEqual(advance("validating", "expire", SUBMISSION, "x"), "expired")
         self.assertEqual(advance("pending", "approve", SUBMISSION, "x"), "published")
         self.assertEqual(advance("pending", "reject", SUBMISSION, "x"), "rejected")
         self.assertEqual(advance("rejected", "revise", SUBMISSION, "x"), "pending")
         self.assertEqual(advance("published", "unpublish", RELEASE, "x"), "unpublished")
 
+    def test_every_parked_status_can_expire(self) -> None:
+        # 清理器会对停在 uploading/validating 的提交发 expire；表里必须有边，
+        # 否则 prune 会在运行时抛异常。
+        for status in ("uploading", "validating"):
+            with self.subTest(status=status):
+                self.assertEqual(advance(status, "expire", SUBMISSION, "x"), "expired")
+
+    def test_validating_cannot_be_approved(self) -> None:
+        with self.assertRaises(StoreError):
+            advance("validating", "approve", SUBMISSION, "x")
+
+    def test_startup_recovers_validating_to_uploading(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = Store(root / "store.db", root / "blobs")
+            _, publisher = store.create_principal("作者", "publisher")
+            result = store.submit(publisher, skill_manifest(), {"SKILL.md": SKILL.encode()})
+            store._db.execute(
+                "UPDATE submissions SET status = 'validating' WHERE id = ?", (result.submission_id,),
+            )
+            store._db.commit()
+            store.close()
+            reopened = Store(root / "store.db", root / "blobs")
+            try:
+                row = reopened._db.execute(
+                    "SELECT status FROM submissions WHERE id = ?", (result.submission_id,),
+                ).fetchone()
+            finally:
+                reopened.close()
+            self.assertEqual(row["status"], "uploading", "启动时要把残留的 validating 退回可重试状态")
+
     def test_unknown_edge_raises(self) -> None:
         with self.assertRaises(StoreError) as caught:
             advance("published", "reject", SUBMISSION, "不能退回已发布的提交")
-        self.assertEqual(caught.exception.rule, "VERSION_UNAVAILABLE")
+        self.assertEqual(caught.exception.rule, "SUBMISSION_STATE_INVALID")
 
     def test_published_submission_cannot_be_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -38,7 +76,7 @@ class TransitionTests(unittest.TestCase):
 
             with self.assertRaises(StoreError) as caught:
                 store.reject(admin, result.submission_id, "不想要了")
-            self.assertEqual(caught.exception.rule, "VERSION_UNAVAILABLE")
+            self.assertEqual(caught.exception.rule, "SUBMISSION_STATE_INVALID")
 
             row = store._db.execute(
                 "SELECT status FROM submissions WHERE id = ?", (result.submission_id,)

@@ -80,8 +80,10 @@ def _has_rule(validation_json: str, rule: str) -> bool:
 def _findings(validation_json: str) -> list[dict]:
     found = []
     for line in json.loads(validation_json):
-        rule, path, message = str(line).split("\t", 2)
-        found.append({"rule": rule, "path": path, "message": message})
+        parts = str(line).split("\t", 3)
+        rule, path, message = parts[0], parts[1], parts[2]
+        severity = parts[3] if len(parts) > 3 and parts[3] else "error"
+        found.append({"rule": rule, "path": path, "message": message, "severity": severity})
     return found
 
 def _diff(previous: dict | None, current: dict) -> list[dict]:
@@ -100,22 +102,17 @@ def _diff(previous: dict | None, current: dict) -> list[dict]:
     walk(previous, current, "")
     return changes
 
-def _read_artifact(path: str | None) -> bytes:
-    """读制品文件。文件缺失时给明确的规则码，不让 `FileNotFoundError` 冒到 HTTP 层。
-
-    `uploading` 状态的提交若被外部清理，`artifact_path` 会指向不存在的文件；
-    已发布版本的制品若被误删也一样。两种情况都应是「这个版本暂时取不到」，
-    而不是 500 加一段栈。
-    """
+def _read_artifact(path: str | Path | None) -> bytes:
+    """读制品文件。文件缺失时给明确的规则码，不让 `FileNotFoundError` 冒到 HTTP 层。"""
     if not path:
-        raise StoreError("VERSION_UNAVAILABLE", "这个版本没有留存制品")
+        raise StoreError("ARTIFACT_MISSING", "这个版本没有留存制品")
     target = Path(path)
     if not target.is_file():
-        raise StoreError("VERSION_UNAVAILABLE", "制品文件已不在，请联系管理员")
+        raise StoreError("ARTIFACT_MISSING", "制品文件已不在，请联系管理员")
     try:
         return target.read_bytes()
     except OSError as exc:
-        raise StoreError("VERSION_UNAVAILABLE", f"制品读取失败：{exc.strerror or exc}") from exc
+        raise StoreError("ARTIFACT_MISSING", f"制品读取失败：{exc.strerror or exc}") from exc
 
 def _read_archive_preview(archive_path: Path) -> tuple[list[str], dict[str, str]]:
     names: list[str] = []
@@ -203,9 +200,24 @@ def _write_tree(root: Path, files: dict[str, bytes], manifest: dict) -> None:
             raise StoreError("CHECKSUM", f"制品路径不合法：{exc}") from exc
         if is_ignored_path(name) or name == "manifest.json":
             continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-    (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        # 同一份 files 里先出现 `a`（文件）、再出现 `a/b`（或反过来）时，
+        # 建父目录/写文件会抛 FileExistsError / IsADirectoryError。那是包本身
+        # 的问题，按 CHECKSUM 退回；不能让它冒成 500（safe_extract 对压缩包
+        # 里的同一情形已有对应处理，两条入口要对齐）。
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except (FileExistsError, NotADirectoryError) as exc:
+            raise StoreError("CHECKSUM", f"包内路径冲突：{name}") from exc
+        if path.is_dir():
+            raise StoreError("CHECKSUM", f"包内路径冲突：{name}")
+        try:
+            path.write_bytes(content)
+        except (IsADirectoryError, NotADirectoryError) as exc:
+            raise StoreError("CHECKSUM", f"包内路径冲突：{name}") from exc
+    try:
+        (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    except (IsADirectoryError, NotADirectoryError) as exc:
+        raise StoreError("CHECKSUM", "包内路径冲突：manifest.json") from exc
 
 def _check_add_platform(published: dict, incoming: dict) -> None:
     if published.get("kind") != "runtime":

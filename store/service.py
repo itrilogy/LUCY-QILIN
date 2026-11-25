@@ -12,10 +12,11 @@ from store.base import StoreBase, _MAX_BYTES, _RETRYABLE_URLS, _UPLOAD_TTL_HOURS
 from store.catalog import CatalogMixin
 from store.errors import Principal, StoreError
 from store.models import SubmitResult
+from store.reports import ReportMixin
 from store.submissions import SubmissionMixin
 
 
-class Store(StoreBase, AuthMixin, SubmissionMixin, CatalogMixin):
+class Store(StoreBase, AuthMixin, SubmissionMixin, CatalogMixin, ReportMixin):
     """门店的唯一入口。方法由各 mixin 提供，状态在 StoreBase。"""
 
 

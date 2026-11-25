@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import os
 import zipfile
 from pathlib import Path
 
@@ -73,20 +74,50 @@ def is_ignored_path(rel_posix: str, ignore_patterns: list[str] | None = None) ->
     return False
 
 
+def atomic_write(path: Path, data: bytes) -> None:
+    """先写 `<path>.part`、fsync，再原子替换目标。
+
+    直接写目标路径时，进程被杀会留下半截文件。备份如果正好抓到它，会把截断的
+    制品连同它的校验和一起存进备份——恢复后看起来"完整"，其实是坏的（评审 P2-8）。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".part")
+    try:
+        with temp.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp.replace(path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def atomic_copy(source: Path, dest: Path) -> None:
+    atomic_write(dest, source.read_bytes())
+
+
 def write_zip(root: Path, dest: Path) -> str:
     dest.parent.mkdir(parents=True, exist_ok=True)
     root_resolved = root.resolve()
     dest_resolved = dest.resolve()
     ignore_patterns = load_storeignore(root_resolved)
     files = sorted(path for path in root_resolved.rglob("*") if path.is_file())
-    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in files:
-            if path.resolve() == dest_resolved:
-                continue
-            rel_posix = path.relative_to(root_resolved).as_posix()
-            if is_ignored_path(rel_posix, ignore_patterns):
-                continue
-            archive.write(path, rel_posix)
+    # 先写 .part 再替换：中途失败不会留下"库已经指向、文件只有一半"的制品。
+    temp = dest.with_name(dest.name + ".part")
+    try:
+        with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in files:
+                if path.resolve() == dest_resolved:
+                    continue
+                rel_posix = path.relative_to(root_resolved).as_posix()
+                if is_ignored_path(rel_posix, ignore_patterns):
+                    continue
+                archive.write(path, rel_posix)
+        temp.replace(dest)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
     return hashlib.sha256(dest.read_bytes()).hexdigest()
 
 

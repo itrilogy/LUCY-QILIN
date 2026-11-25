@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-NAMES = ("upload", "knowledge", "skill", "mcp", "mcp+skill", "runtime", "plugin")
+NAMES = ("upload", "knowledge", "skill", "mcp", "mcp+skill", "runtime", "plugin", "knowledge-intake")
 
 # 协议的数据文件。和散文规范分开：散文走 qilin://spec/<name>，数据走 qilin://<kind>/knowledge。
 # 这些文件随包分发；MCP 直接读，不在代码里再抄一份。
@@ -33,17 +33,20 @@ _BLURB = {
     "mcp+skill": "技能加 MCP。先满足两边，调用形式 load_skill_then_mcp。",
     "runtime": "商店托管的依赖。不上默认货架。只有这种可以追加平台。",
     "plugin": "插件。Host/Client 可执行代码，按 Tier A/B/C 分级；配置式 bundle 仍走 mcp。",
+    "knowledge-intake": "知识包下载后的本地入库约定：有管理插件就调用它，没有就保持目录形态。",
 }
 
 _TEXT = {
     "upload": """上架说明。这份文本由商店 MCP 下发。技能正文和 references 不记载上架步骤。先取规范，再整理目录，再按本文上传。
 
 1. 调 get_spec。name 取要交的种类：knowledge、skill、mcp、mcp+skill、runtime、plugin。按返回的文本整理目录根上的 manifest.json 和文件。不要另造字段，也不要去技能文件里找上架步骤。
-2. 调 validate，只传清单。返回 ok、rules、findings。ok 为 false，或 findings 里还有 severity 为 error，就按 path 和 message 改，再 validate。还有错误就不要 begin_submit。
-3. ok 为 true 之后，在栖林仓库根执行 python -m store.cli submit <目录>。这条命令自己会 begin_submit、对返回的地址做 PUT、再 finish_submit。不要自己编 curl。已经用了这条命令，就不要再手动 begin_submit，以免交成两条。
-4. 钥匙只来自环境变量 QILIN_STORE_KEY。不进命令行，不进命令输出，不写进笔记、清单或记忆。命令不生成钥匙。这不是登录口令，也不是 QILIN_HUB_SECRET。地址用 QILIN_STORE_URL，不设则是 http://127.0.0.1:8787。
-5. 成功时 status 为 pending，表示待审核，不是已发布。把 submission_id 原样告诉用户。rejected 或 invalid 时把 rules 和 message 原样告诉用户。没有 QILIN_STORE_KEY 时退出码是 2，停下来让用户自己设。
-6. 作者的 KEY 不能发布。退回原因在 list_my_submissions 和 get_submission。改包后再交。同一 id 归首个发布者，别人不能再发新版本；新 id 直接提交，不需要登记。
+2. 调 validate。既可只传 manifest 做静态校验，也可同时传 files（相对路径到 base64）或 skill_md（SKILL.md 原文）在上传前完成跨文件全量预检（含 frontmatter、入口文件、绑定脚本与密钥扫描）。返回 ok、scope、rules、findings。ok 为 false，或 findings 里还有 severity 为 error，就按 path 和 message 改，再 validate。还有错误就不要 begin_submit。
+3. ok 为 true 之后，按包体大小二选一提交（只选一条路，不要重复提交成两条）：
+   - 8MiB 以内小包：直接调 MCP 的 submit_package(manifest, files)，全流程不依赖本地 CLI 或外部命令。
+   - 大包或多文件目录：若有栖林 CLI，在仓库根执行 python -m store.cli submit <目录>；若无本地 CLI，调 begin_submit(manifest, byte_size) 拿到免 KEY 一次性上传凭据（upload_url + upload_headers，或含 ticket 的 put_url），对本地打好的标准 zip 发送二进制 HTTP PUT（例如 curl --fail-with-body -X PUT -H "X-Upload-Ticket: <ticket>" --data-binary @package.zip <upload_url>，无需携带 Authorization），上传 200 后再调 finish_submit(submission_id)。纯远程无文件 MCP（byte_size=0）返回 put_url 为 null，直接调 finish_submit。
+4. 钥匙只来自环境变量 QILIN_STORE_KEY（或客户端 MCP 配置），绝不进命令行、不进命令输出，不写进笔记、清单或记忆。命令不生成钥匙。这不是登录口令，也不是 QILIN_HUB_SECRET。地址用 QILIN_STORE_URL，不设则是 http://127.0.0.1:8787。
+5. 成功时 status 为 pending，表示待审核，不是已发布。把 submission_id 原样告诉用户。rejected 或 invalid 时把 rules 和 message 原样告诉用户。若提交卡在 uploading 或被 rejected 需要放弃重来，可调 withdraw(submission_id) 取消并回收临时上传包。没有 QILIN_STORE_KEY 时 CLI 退出码是 2，停下来让用户自己设。
+6. 作者的 KEY 不能发布。退回原因在 list_my_submissions 和 get_submission。改包后再交。同一命名空间（id 第一个点之前）归首个发布者，别人不能再发；新命名空间直接提交，不需要登记。
 7. 不要把密钥文件或密钥值打进包。secrets 只写环境变量名。spec_version 固定为 1。""",
     "knowledge": """知识包规范。kind 为 knowledge。商店不判断文章好不好，只看这组笔记能不能按协议闭合。
 
@@ -68,7 +71,7 @@ _TEXT = {
 
 链接只认 [[篇名]]、[[篇名|显示]]、[[篇名#标题]]。篇名是文件名去掉 .md，必须对上包内一篇（NOTE_LINK）；带 #标题 时，目标篇必须真有这个标题。代码块与行内代码里的链接不查。没有任何入链的篇（入口除外）记 warning NOTE_ORPHAN，不阻断。
 
-单篇不超过 256KiB，整包不超过 8MiB（NOTE_FILE）。安装仍是下载并解压到 ${KNOWLEDGE_ROOT}/<id>/<version>，再核对入口文件在；知识树路径按 taxonomy 计算，但当前安装目录不按树走。环境变量是 QILIN_KNOWLEDGE_ROOT。
+单篇不超过 256KiB，整包不超过 8MiB（NOTE_FILE）。安装仍是下载并解压到 ${KNOWLEDGE_ROOT}/<id>/<version>，再核对入口文件在；知识树路径按 taxonomy 计算，但当前安装目录不按树走。环境变量是 QILIN_KNOWLEDGE_ROOT，未设置则 ~/.qilin/knowledge。安装后按 qilin://spec/knowledge-intake 处理入库。
 
 协议资源：qilin://schema/knowledge、qilin://vocab/knowledge、qilin://tags/knowledge、qilin://metadata/knowledge、qilin://checklist/knowledge、qilin://example/knowledge。""",
     "skill": """纯技能规范。kind 为 skill。安装是解压，不建立 MCP 连接。
@@ -77,22 +80,29 @@ zip 根上有 manifest.json 和 SKILL.md。references、scripts、platform 可�
 
 - skill.entry 必须是 SKILL.md，文件必须在。否则 SKILL_ENTRY_MISSING。
 - invoke.form 必须是 load_skill，invoke.entry 与 skill.entry 相同。否则 SKILL_INVOKE。
-- clients 里每个工具都要能装技能目录。当前只有 reasonix 有 skill_dir。不要给没有这个能力的工具填技能。规则 CLIENT_CAPABILITY。
-- 声明了 platform/<工具>.md 时，文件必须在。也可以用 skill.platform_files 写实际文件名。缺了则 PLATFORM_FILE_MISSING。
+- clients 里每个工具都要能装技能目录（当前支持 skill_dir 的客户端：reasonix、deepseek-harness、antigravity）。不要填 generic 或没有 skill_dir 能力的客户端。规则 CLIENT_CAPABILITY。
+- 包内若含 platform/*.md，必须在 skill.platform_files 对象中显式登记每个客户端对应的相对路径（例如 {"reasonix": "platform/reasonix.md"}），且声明的文件必须在包内存在；否则报 PLATFORM_FILE_MISSING。没有 platform/*.md 时可不写 skill.platform_files。
 - 纯提示词、没有本机二进制时，platforms 写 ["any"]。脚本只在某些系统能跑，就写具体平台 id。
-- SKILL.md 的 frontmatter 继续给运行端用。name、description、能解析的 version 不得和清单说成另一件事。规则 FRONTMATTER_CONFLICT。
+- SKILL.md 的 frontmatter 继续给运行端用：
+  - 若写了可解析 SemVer 的 version，必须与 manifest.version 完全一致（error：FRONTMATTER_CONFLICT）；
+  - 若写了 dependency 列表，其中每一项必须在 depends.external[].name 或 depends.store[].id 中声明（error：FRONTMATTER_CONFLICT）；
+  - 若写了 allowed-tools 且包声明了 depends.mcp，其中 mcp__<server>__* 前缀对应的服务必须在 depends.mcp 中出现（error：FRONTMATTER_CONFLICT）；
+  - manifest.summary 建议取 frontmatter description 的原句或子串；若不一致会给出 severity=warning 的 FRONTMATTER_CONFLICT 提示，不阻断提交。上传前可调 validate(manifest, skill_md=...) 提前核对。
 - 密钥只写 secrets 里的变量名。文件名命中 secret、credential、.env、*key*.md（SKILL.md 除外），或正文里出现密钥样式，则 SECRET_FILE 或 SECRET_PATTERN。扫描是拒收，不是打码后放行。
 
-depends 按需要填写。外部命令要有 name、version_range、detect（字符串数组，不是一条 shell）、至少 20 字且含依赖名的 install_guide，以及 https 的 resources。地址不是 https 则 DEP_EXTERNAL_URL。地址当时打不开则留在 uploading，规则 DEP_EXTERNAL_UNREACHABLE，可以再交一次。""",
-    "mcp": """纯 MCP 规范。kind 为 mcp。安装是写入一条连接，商店不代理流量。
+depends 按需要填写。外部命令要有 name、version_range、detect（字符串数组，不是一条 shell）、至少 20 字且含依赖名的 install_guide，以及 https 的 resources（内网白名单主机可走 http）。地址协议不合规报 DEP_EXTERNAL_URL。外网不可达时按服务端 QILIN_URL_CHECK 策略处理：strict 模式留在 uploading（规则 DEP_EXTERNAL_UNREACHABLE，可重试），内网 warn 模式记 warning 由审核人工复核，off 模式跳过探测。""",
+    "mcp": """纯 MCP 规范。kind 为 mcp。商店不代理运行时流量。
 
 必填 mcp 与 invoke。
 - transport 只能是 stdio 或 streamable-http。否则 MCP_TRANSPORT。
-- streamable-http 必须有 https 的 url，不要 command。stdio 必须有 command 和 args，不要 url。否则 MCP_CONNECT。
+- streamable-http 必须有 https 的 url（内网白名单主机可走 http），不要 command。stdio 必须有 command 和 args，不要 url。否则 MCP_CONNECT。
 - invoke.form 为 list_tools（连上后向服务器要工具列表）或 documented（清单里写清工具名和一句话）。否则 MCP_INVOKE。
-- 远程地址且没有本机依赖时，platforms 才能是 ["any"]。否则 PLATFORM_TOO_BROAD。
-- stdio 的 client 必须有 mcp_stdio。streamable-http 的 client 必须有 mcp_http。规则 CLIENT_CAPABILITY。
-- 纯远程可以只交 manifest.json，没有 zip。
+- 远程地址且没有本机依赖时，platforms 才能是 ["any"]；若含跨平台通用脚本需注明支持平台。否则 PLATFORM_TOO_BROAD。
+- stdio 的 client 必须有 mcp_stdio（如 reasonix、claude-desktop、cursor、deepseek-harness、antigravity、generic）。streamable-http 的 client 必须有 mcp_http。规则 CLIENT_CAPABILITY。
+- 制品形态（口径 A）：
+  - 纯远程 streamable-http（或仅调用系统既有命令、无随包脚本的 stdio）无需 zip 制品：submit_package 传空 files {}，或 begin_submit 传 byte_size=0 后直接 finish_submit；此类版本调 artifact 返回 KIND_NO_ARTIFACT。
+  - 含随包桥接脚本或代码的 stdio MCP：将脚本随 manifest.json 一并打成单份 zip 提交。stdio.args 中引用的相对路径脚本必须在包内真实存在（缺失报 MCP_CONNECT）。发布后 artifact 返回该 zip 的下载地址与 sha256，install_plan 自动生成 download + unpack（解压至 ${MCP_DIR}/<id>/<version>）并将相对脚本参数重写为解压目录绝对路径后执行 mcp_add 与 verify。
+- kind=mcp 不支持 submit_kind=add_platform（只有 runtime 支持按平台追加资产）。
 
 密钥只写变量名。不要把钥匙的值写进 url、args 或说明。""",
     "mcp+skill": """技能加 MCP。kind 为 mcp+skill。同时满足 get_spec name=mcp 和 name=skill。
@@ -135,6 +145,22 @@ package.json：
 - 同一个已发布版本只能追加还没有的平台，用 submit_kind=add_platform。不能换掉已经发出去的文件。技能、MCP、知识包不能追加平台。规则 VERSION_IMMUTABLE。
 
 被别人引用时写在对方的 depends.store，指向已发布的 runtime id 和版本范围。""",
+    "knowledge-intake": """知识包入库规范。知识包下载并解压之后，客户端按本段决定「怎么把它登记进本机知识库」。商店不执行入库，也不在本机运行插件。
+
+一、位置。知识根按 QILIN_KNOWLEDGE_ROOT 解析，未设置则 ~/.qilin/knowledge。安装计划把包解压到 ${KNOWLEDGE_ROOT}/<id>/<version>；不要按 taxonomy 改目录，也不要使用 tree_dest 作为实际落点。
+
+二、何时调用。解压并核对入口之后，如果客户端存在知识包管理插件/技能（约定：工具 knowledge_intake，技能 zhilin-intake），调用它完成入库。参数：
+- path：解压后的目录，${KNOWLEDGE_ROOT}/<id>/<version>；
+- id、version：安装计划里的精确值。
+插件负责校验清单与入口、复制到主根、原子更新 library.json；重复调用是幂等的。
+
+三、没有插件时。保持目录形态即可。任何按知识根扫描的阅读器都能读到；不要让 AI 手工移动、改名、删文件，也不要手写 library.json。
+
+四、边界。不要修改包内文件；不要因为入库失败删除源目录；不要声称已经按 security_level 做了访问控制——密级是声明，不是 ACL。失败时按插件返回的 code 处理：BAD_MANIFEST / BAD_ENTRY 不要重试；TOO_LARGE 按商店上限处理；TARGET_EXISTS 让用户决定保留哪一份。
+
+五、安装计划。kind=knowledge 的 install_plan 会带 post_install 数组，第一项 op 为 knowledge_intake，含 path、id、version、tool、skill、required=false。required 为 false 表示没有插件时跳过，不影响包本身可用。
+
+六、与上架规范的关系。本段只管「下载之后」；包的字段、链接、标签、密级仍按 qilin://spec/knowledge 和 qilin://vocab/knowledge 校验，两者不互相替代。""",
 }
 
 

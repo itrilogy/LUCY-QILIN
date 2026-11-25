@@ -10,6 +10,7 @@ from pathlib import Path
 
 from store.base import _MAX_BYTES
 from store.blobs import write_zip
+from store.submissions import _has_payload_files
 from store.validator.validate import validate_path
 
 
@@ -36,7 +37,8 @@ def submit_directory(
             "message": "没有 QILIN_STORE_KEY。把它设成连接商店用的那把钥匙，不要写进命令，也不要写进笔记。",
         }
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    archive = _zip(root)
+    pure_mcp_no_zip = manifest.get("kind") == "mcp" and not _has_payload_files(root)
+    archive = b"" if pure_mcp_no_zip else _zip(root)
     if len(archive) > _MAX_BYTES:
         return 1, {
             "status": "invalid",
@@ -48,20 +50,23 @@ def submit_directory(
         "submit_kind": submit_kind,
         "byte_size": len(archive),
     })
-    if started.get("rule") or started.get("status") != "uploading" or not started.get("put_url"):
+    if started.get("rule") or started.get("status") != "uploading" or (not pure_mcp_no_zip and not started.get("put_url")):
         return 1, {
             "status": "rejected",
             "submission_id": started.get("submission_id"),
             "rules": started.get("rules") or ([started["rule"]] if started.get("rule") else []),
             "message": started.get("message") or "",
         }
-    put = _put(str(started["put_url"]), key, archive)
-    if put is not None:
-        return 1, {
-            "status": "uploading",
-            "submission_id": started["submission_id"],
-            "message": put,
-        }
+    if started.get("put_url") or started.get("upload_url"):
+        upload_url = str(started.get("upload_url") or started["put_url"])
+        upload_headers = started.get("upload_headers") if isinstance(started.get("upload_headers"), dict) else None
+        put = _put(upload_url, key, archive, extra_headers=upload_headers)
+        if put is not None:
+            return 1, {
+                "status": "uploading",
+                "submission_id": started["submission_id"],
+                "message": put,
+            }
     finished = _tool(base, key, "finish_submit", {"submission_id": started["submission_id"]})
     if finished.get("rule"):
         return 1, {
@@ -123,12 +128,17 @@ def _tool(base: str, key: str, name: str, arguments: dict) -> dict:
         return {"rule": "VERSION_UNAVAILABLE", "message": "商店没有返回提交结果。"}
 
 
-def _put(url: str, key: str, archive: bytes) -> str | None:
+def _put(
+    url: str, key: str, archive: bytes, *, extra_headers: dict[str, str] | None = None,
+) -> str | None:
+    headers = dict(extra_headers or {})
+    if "X-Upload-Ticket" not in headers and key:
+        headers["Authorization"] = "Bearer " + key
     request = urllib.request.Request(
         url,
         data=archive,
         method="PUT",
-        headers={"Authorization": "Bearer " + key},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:

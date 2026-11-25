@@ -6,8 +6,9 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
-from store.blobs import safe_extract, write_zip
+from store.blobs import atomic_write, safe_extract, write_zip
 from store.installer import _unpack
 from store.plan import install_plan
 from store.safety import PathEscape, safe_join
@@ -269,6 +270,34 @@ class HardeningTests(unittest.TestCase):
             self.assertEqual(caught.exception.rule, "RUNTIME_ASSET")
         self.assertEqual(list(escaped.iterdir()), [])
         self.assertFalse((root / "pkg" / "evil.bin").exists())
+
+    def test_atomic_write_leaves_no_part_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "deep" / "artifact.zip"
+            atomic_write(target, b"first")
+            atomic_write(target, b"second")
+            self.assertEqual(target.read_bytes(), b"second")
+            self.assertEqual(list(target.parent.glob("*.part")), [])
+
+    def test_atomic_write_keeps_old_content_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "artifact.zip"
+            atomic_write(target, b"good")
+            with mock.patch("os.fsync", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    atomic_write(target, b"broken")
+            self.assertEqual(target.read_bytes(), b"good", "失败时旧文件必须完好")
+            self.assertEqual(list(target.parent.glob("*.part")), [], "失败不能留下 .part")
+
+    def test_write_zip_leaves_no_part_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "keep.md").write_text("ok", encoding="utf-8")
+            dest = root / "out.zip"
+            digest = write_zip(root, dest)
+            self.assertTrue(dest.is_file())
+            self.assertEqual(list(root.glob("*.part")), [])
+            self.assertEqual(digest, __import__("hashlib").sha256(dest.read_bytes()).hexdigest())
 
     def test_keep_assets_writes_inside_blobs(self) -> None:
         tmp = tempfile.TemporaryDirectory()

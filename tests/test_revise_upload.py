@@ -94,7 +94,7 @@ class ReviseUploadTests(unittest.TestCase):
             self.store.begin_revise(
                 self.publisher, original.submission_id, self._revised_manifest(), byte_size=1
             )
-        self.assertEqual(caught.exception.rule, "VERSION_UNAVAILABLE")
+        self.assertEqual(caught.exception.rule, "SUBMISSION_STATE_INVALID")
 
     def test_finish_without_upload_is_refused(self) -> None:
         original = self._submit()
@@ -116,7 +116,8 @@ class ReviseUploadTests(unittest.TestCase):
         revision = self.store._db.execute(
             "SELECT artifact_path FROM revisions WHERE submission_id = ?", (original.submission_id,)
         ).fetchone()
-        archive = Path(revision["artifact_path"])
+        archive = self.store.resolve_blob_path(revision["artifact_path"])
+        assert archive is not None
         self.assertTrue(archive.is_file())
         self.store._db.execute(
             "UPDATE revisions SET created_at = datetime('now', '-3 days') WHERE submission_id = ?",

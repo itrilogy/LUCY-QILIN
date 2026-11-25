@@ -19,7 +19,7 @@ from pathlib import Path
 from store.accounts import key_prefix
 from store.http_api import _MAX_BODY, _session_cookie, serve
 from store.service import Store, StoreError, _UPLOAD_TTL_HOURS
-from tests.test_service import skill_manifest
+from tests.test_service import bootstrap_admin, skill_manifest
 
 PASSWORD = "LinShen-2026"
 
@@ -127,6 +127,8 @@ class PublicBaseTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.store = Store(root / "store.db", root / "blobs")
         self.addCleanup(self.store.close)
+        # 空库不开放 HTTP 注册（管理员要先 init-admin），这里等价地引导一个。
+        bootstrap_admin(self.store)
         self.server = serve(self.store)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -239,7 +241,7 @@ class ArtifactMissingTests(unittest.TestCase):
         _, self.publisher = self.store.create_principal("作者", "publisher")
         _, self.admin = self.store.create_principal("管理员", "admin")
 
-    def test_deleted_artifact_raises_version_unavailable(self) -> None:
+    def test_deleted_artifact_raises_artifact_missing(self) -> None:
         from tests.test_service import SKILL
 
         result = self.store.submit(self.publisher, skill_manifest(), {"SKILL.md": SKILL.encode()})
@@ -247,10 +249,12 @@ class ArtifactMissingTests(unittest.TestCase):
         row = self.store._db.execute(
             "SELECT artifact_path FROM releases WHERE package_id = ?", ("luxi.gov-writer",),
         ).fetchone()
-        Path(row["artifact_path"]).unlink()
+        archive = self.store.resolve_blob_path(row["artifact_path"])
+        assert archive is not None
+        archive.unlink()
         with self.assertRaises(StoreError) as caught:
             self.store.artifact("luxi.gov-writer", "3.2.0")
-        self.assertEqual(caught.exception.rule, "VERSION_UNAVAILABLE")
+        self.assertEqual(caught.exception.rule, "ARTIFACT_MISSING")
 
 
 def _cookie(header: str) -> str:

@@ -17,6 +17,7 @@ PLATFORMS = {
 # v1 客户端能力。generic 没有能力，不能用来绕过闭合检查。
 CLIENTS: dict[str, set[str]] = {
     "reasonix": {"skill_dir", "mcp_stdio", "local_bin"},
+    "antigravity": {"skill_dir", "mcp_stdio", "mcp_http", "local_bin"},
     "claude-desktop": {"mcp_stdio", "mcp_http"},
     "cursor": {"mcp_stdio", "mcp_http"},
     "deepseek-harness": {"skill_dir", "mcp_stdio", "mcp_http", "local_bin", "plugin"},

@@ -33,4 +33,4 @@ jobs:
       - name: Wheel install smoke
         run: |
           python -m pip install --no-deps --target "$RUNNER_TEMP/qilin-wheel" dist/*.whl
-          PYTHONPATH="$RUNNER_TEMP/qilin-wheel" python -c "from store.http_api import PORTAL; from store.backup import backup; assert PORTAL.is_file(); print('wheel smoke ok')"
+          PYTHONPATH="$RUNNER_TEMP/qilin-wheel" python -c "from store.http_api import PORTAL, DESIGN_FILES; from store.backup import backup; assert PORTAL.is_file(); assert all(p.is_file() for p in DESIGN_FILES.values()), '门户静态资源没打进 wheel'; print('wheel smoke ok')"

@@ -122,6 +122,9 @@ class McpTests(unittest.TestCase):
         uris = [item["uri"] for item in listed["result"]["resources"]]
         self.assertIn("qilin://spec/knowledge", uris)
         self.assertIn("qilin://spec/upload", uris)
+        self.assertIn("qilin://spec/knowledge-intake", uris)
+        intake = self._rpc("resources/read", {"uri": "qilin://spec/knowledge-intake"}, token="")
+        self.assertIn("knowledge_intake", intake["result"]["contents"][0]["text"])
         read = self._rpc("resources/read", {"uri": "qilin://spec/knowledge"}, token="")
         body = read["result"]["contents"][0]["text"]
         spec = self._tool("get_spec", {"name": "knowledge"}, "")
@@ -211,6 +214,103 @@ class McpTests(unittest.TestCase):
         with urllib.request.urlopen(request) as response:
             return json.load(response)
 
+    def _post_json(self, body, headers: dict | None = None) -> tuple[int, dict]:
+        header = {"Content-Type": "application/json", **(headers or {})}
+        request = urllib.request.Request(
+            self.base + "/mcp", data=json.dumps(body).encode(), headers=header,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode() or "{}")
+            exc.close()
+            return exc.code, payload
+
+    def test_unsupported_protocol_version_is_rejected(self) -> None:
+        status, body = self._post_json(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            {"MCP-Protocol-Version": "1999-01-01"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(body["rule"], "MCP_TRANSPORT")
+
+    def test_supported_protocol_version_passes(self) -> None:
+        status, body = self._post_json(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            {"MCP-Protocol-Version": "2025-06-18"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("tools", body["result"])
+
+    def _post_with_headers(self, body, headers: dict) -> tuple[int, dict, dict]:
+        request = urllib.request.Request(
+            self.base + "/mcp",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", **headers},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.load(response), dict(response.getheaders())
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode() or "{}")
+            headers_out = dict(exc.headers or {})
+            exc.close()
+            return exc.code, payload, headers_out
+
+    def test_stateless_mcp_ignores_stale_session_ids_and_supports_2025_11_25(self) -> None:
+        init = {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {},
+                       "clientInfo": {"name": "test", "version": "0"}},
+        }
+        status, init_body, headers = self._post_with_headers(
+            init, {"MCP-Protocol-Version": "2025-11-25"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(init_body["result"]["protocolVersion"], "2025-11-25")
+        self.assertIsNone(headers.get("Mcp-Session-Id"), "无状态模式不应下发 Mcp-Session-Id")
+
+        # initialize 自身承担版本协商，不受请求头未知版本预检阻断。
+        status, fallback_body, _ = self._post_with_headers(
+            {
+                "jsonrpc": "2.0", "id": 10, "method": "initialize",
+                "params": {"protocolVersion": "2099-01-01", "capabilities": {},
+                           "clientInfo": {"name": "future", "version": "0"}},
+            },
+            {"MCP-Protocol-Version": "2099-01-01"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(fallback_body["result"]["protocolVersion"], "2025-11-25")
+
+        # 客户端携带任意或过期的 Mcp-Session-Id 均应正常放行，不再回 404。
+        listed = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        status, body, _ = self._post_with_headers(listed, {"Mcp-Session-Id": "stale-or-bogus-session"})
+        self.assertEqual(status, 200)
+        self.assertIn("tools", body["result"])
+
+        status, body, _ = self._post_with_headers(listed, {})
+        self.assertEqual(status, 200)
+        self.assertIn("tools", body["result"])
+
+    def test_batch_requests_get_a_jsonrpc_error(self) -> None:
+        status, body = self._post_json([
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        ])
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["error"]["code"], -32600)
+
+    def test_bad_tool_arguments_do_not_become_a_500(self) -> None:
+        # kind 应该是字符串；传数组时旧实现会漏出 sqlite3.ProgrammingError -> HTTP 500。
+        status, body = self._post_json(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": "search", "arguments": {"kind": ["skill"]}}},
+        )
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["result"]["isError"])
+        self.assertEqual(json.loads(body["result"]["content"][0]["text"])["rule"], "SPEC_VERSION")
+
     def _put(self, url: str, data: bytes, token: str) -> None:
         request = urllib.request.Request(
             url, data=data, method="PUT", headers={"Authorization": f"Bearer {token}"},
@@ -235,7 +335,7 @@ def _raw_get(port: int) -> bytes:
     finally:
         sock.close()
     data = b"".join(chunks)
-    if b"Allow: POST" not in data or not data.startswith(b"HTTP/1.0 405"):
+    if b"Allow: POST" not in data or not data.startswith(b"HTTP/1.") or b" 405" not in data.split(b"\r\n")[0]:
         raise AssertionError(data)
     return data
 

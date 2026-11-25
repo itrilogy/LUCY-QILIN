@@ -1,0 +1,159 @@
+# 栖林商店 —— 单机容器化部署
+#
+#   cp deploy/docker/.env.example .env    # 至少改 QILIN_PUBLIC_BASE
+#   docker compose build
+#   docker compose up -d
+#
+# 边缘（TLS）二选一：
+#   A. 本机已有 Caddy/nginx  → 保持默认，只发布到 127.0.0.1:8787
+#   B. 用容器里的 Caddy      → 在 .env 设 QILIN_DOMAIN，然后 docker compose --profile edge up -d
+#
+# 约束：qilin 服务只能有一个副本。SQLite 写路径、限流、KEY 缓存都是进程内状态，
+# 两个副本指向同一个库会互相踩。见 docs/Docker容器化部署设计-2026-11-20.md。
+
+name: qilin
+
+x-qilin-build: &qilin-build
+  context: .
+  dockerfile: deploy/docker/Dockerfile
+  args:
+    PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
+    PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.13-slim-bookworm}
+    BUILDER_IMAGE: ${BUILDER_IMAGE:-}
+    PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    QILIN_UID: ${QILIN_UID:-10001}
+    QILIN_GID: ${QILIN_GID:-10001}
+    GIT_SHA: ${GIT_SHA:-unknown}
+    BUILD_DATE: ${BUILD_DATE:-unknown}
+
+x-qilin-common: &qilin-common
+  image: ${QILIN_IMAGE:-qilin:local}
+  build: *qilin-build
+  init: true
+  read_only: true
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+services:
+  qilin:
+    <<: *qilin-common
+    container_name: ${QILIN_CONTAINER_NAME:-qilin}
+    restart: unless-stopped
+    environment:
+      QILIN_HOST: 0.0.0.0
+      QILIN_PORT: "8787"
+      QILIN_DB: /var/lib/qilin/qilin.db
+      QILIN_BLOBS: /var/lib/qilin/blobs
+      QILIN_TMPDIR: /var/lib/qilin/tmp
+      # 部署在反代之后时必须固定成对外的 https 地址，不要让应用按 Host 头猜。
+      QILIN_PUBLIC_BASE: ${QILIN_PUBLIC_BASE:-}
+      # 反代在同一 compose 网络里，X-Forwarded-For / X-Real-IP 由可信代理写入。
+      # 若开放 0.0.0.0:8787 直连，务必设置 QILIN_TRUSTED_PROXIES 限定反代 IP（如 10.37.87.25）。
+      QILIN_TRUST_PROXY: ${QILIN_TRUST_PROXY:-1}
+      QILIN_TRUSTED_PROXIES: ${QILIN_TRUSTED_PROXIES:-}
+      QILIN_REGISTRATION: ${QILIN_REGISTRATION:-open}
+      QILIN_LOG_LEVEL: ${QILIN_LOG_LEVEL:-WARNING}
+      QILIN_ACCESS_LOG: ${QILIN_ACCESS_LOG:-0}
+      QILIN_HUB_ORIGIN: ${QILIN_HUB_ORIGIN:-}
+      QILIN_APP_ID: ${QILIN_APP_ID:-}
+      QILIN_HUB_AUTHORIZE: ${QILIN_HUB_AUTHORIZE:-}
+      # 密钥优先用挂载文件（entrypoint 支持 *_FILE），退而求其次才用环境变量。
+      QILIN_HUB_SECRET_FILE: ${QILIN_HUB_SECRET_FILE:-}
+      QILIN_HUB_SECRET: ${QILIN_HUB_SECRET:-}
+      # 外部地址抓取（上传校验时服务端会访问清单里的地址）：
+      # public=只允许公网（默认）；allowlist=只允许下面列出的主机；any=全放开。
+      QILIN_FETCH_POLICY: ${QILIN_FETCH_POLICY:-public}
+      QILIN_FETCH_ALLOW_HOSTS: ${QILIN_FETCH_ALLOW_HOSTS:-}
+      # 外部依赖 URL 探活策略：strict（阻断）/ warn（内网推荐，不可达降级为 warning）/ off（不探活）
+      QILIN_URL_CHECK: ${QILIN_URL_CHECK:-warn}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # 数据目录用宿主绑定挂载：可直接看、可直接备份、迁移就是一次 cp。
+      # 属主必须是 QILIN_UID（默认 10001），先执行：
+      #   sudo install -d -o 10001 -g 10001 -m 0750 /srv/qilin/data
+      - ${QILIN_DATA_DIR:-./data}:/var/lib/qilin
+      # 用 QILIN_HUB_SECRET_FILE 时把密钥文件挂进来（只读），并在 .env 设绝对路径：
+      # - ${QILIN_HUB_SECRET_FILE}:/run/secrets/qilin_hub_secret:ro
+    ports:
+      # 只绑回环：正式流量走 443 的反代，8787 不对公网开口。
+      # 容器内固定监听 8787；要换宿主端口改 QILIN_HOST_PORT，不要改 QILIN_PORT。
+      - "${QILIN_BIND:-127.0.0.1}:${QILIN_HOST_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/qilin-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    stop_grace_period: 30s
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "${QILIN_CPUS:-1.0}"
+          memory: ${QILIN_MEMORY:-512M}
+          pids: 256
+
+  # 边缘 TLS。只在 --profile edge 时启动；用外部反代时保持不启动。
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: qilin-caddy
+    profiles: ["edge"]
+    restart: unless-stopped
+    depends_on:
+      qilin:
+        condition: service_healthy
+    environment:
+      QILIN_DOMAIN: ${QILIN_DOMAIN:-qilin.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # 一次性备份任务：docker compose run --rm backup
+  # 平时由宿主 cron / systemd timer 调度（见部署设计文档第 7 节）。
+  backup:
+    <<: *qilin-common
+    profiles: ["ops"]
+    container_name: ${QILIN_BACKUP_CONTAINER_NAME:-qilin-backup}
+    entrypoint: ["/usr/local/bin/qilin-backup"]
+    environment:
+      QILIN_DB: /var/lib/qilin/qilin.db
+      QILIN_BLOBS: /var/lib/qilin/blobs
+      QILIN_TMPDIR: /var/lib/qilin/tmp
+      QILIN_BACKUP_ROOT: /backups
+      QILIN_BACKUP_KEEP: ${QILIN_BACKUP_KEEP:-14}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${QILIN_DATA_DIR:-./data}:/var/lib/qilin
+      # 绑定挂载目录的属主必须是 QILIN_UID，先执行：
+      #   sudo install -d -o 10001 -g 10001 -m 0750 /srv/qilin/backups
+      - ${QILIN_BACKUP_DIR:-./backups}:/backups
+
+volumes:
+  caddy-data:
+  caddy-config:

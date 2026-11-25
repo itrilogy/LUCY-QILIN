@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="栖林商店">
-  <rect width="64" height="64" rx="14" fill="#0D5E42"/>
-  <path d="M18 44V22h6v22zm10 0V16h6v28zm10 0V26h6v18z" fill="#F1C40F"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="栖林商店 QiLin Store">
+  <rect width="64" height="64" rx="16" fill="#0D5E42"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.7">
+    <path d="M32 12 16.5 32h31L32 12Z" stroke="#F5F7FA"/>
+    <path d="M32 24 20.5 42h23L32 24Z" stroke="#F1C40F"/>
+  </g>
+  <rect x="13" y="52" width="38" height="4" rx="2" fill="#00D2FF" opacity="0.9"/>
 </svg>

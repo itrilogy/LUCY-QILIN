@@ -70,9 +70,18 @@ def auth_failure(handler, rule: str, detail: str = "") -> None:
     )
 
 
-def rejected(rule: str, package_id: str, actor: str = "") -> None:
-    """校验拒绝。"""
-    LOGGER.info("reject %s %s %s", rule, package_id, actor)
+def rejected_request(handler, rule: str, detail: str = "") -> None:
+    """业务拒绝（不是鉴权失败）。
+
+    默认级别是 WARNING，所以这些行在被调成 INFO 之前不可见——这是刻意的：
+    业务拒绝量大，不该淹没真正的告警。排障时 `QILIN_LOG_LEVEL=INFO` 打开。
+    """
+    LOGGER.info("reject %s %s %s %s", rule, client_of(handler), _path(handler), detail)
+
+
+def storage_warning(detail: str) -> None:
+    """存储与制品可读性告警（如数据库有记录但磁盘文件缺失/校验和不符）。"""
+    LOGGER.warning("storage %s", detail)
 
 
 def internal(handler, exc: BaseException) -> str:

@@ -25,6 +25,7 @@ store = [
   "portal/index.html",
   "portal/styles.css",
   "portal/app.js",
+  "portal/manifest_merge.js",
   "portal/assets/*",
   "spec/*.json",
 ]

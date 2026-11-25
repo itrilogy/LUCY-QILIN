@@ -36,7 +36,13 @@ class RuleContractTests(unittest.TestCase):
         self.assertEqual(http_status("ROLE_FORBIDDEN"), 403)
         self.assertEqual(http_status("IDENTITY_INVALID"), 401)
         self.assertEqual(http_status("IDENTITY_UNCONFIGURED"), 401)
-        self.assertEqual(http_status("VERSION_UNAVAILABLE"), 400)
+        self.assertEqual(http_status("VERSION_UNAVAILABLE"), 404)
+        self.assertEqual(http_status("RESOURCE_NOT_FOUND"), 404)
+        self.assertEqual(http_status("SUBMISSION_STATE_INVALID"), 409)
+        self.assertEqual(http_status("REPORT_STATE_INVALID"), 409)
+        self.assertEqual(http_status("ARTIFACT_MISSING"), 503)
+        self.assertEqual(http_status("KIND_NO_ARTIFACT"), 400)
+        self.assertEqual(http_status("REPORT_INVALID"), 400)
         self.assertEqual(http_status("没有这个规则"), 400)
 
     def test_auth_rules_are_logged_at_warning(self) -> None:

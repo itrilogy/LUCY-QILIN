@@ -1,0 +1,42 @@
+{
+	# 关掉 admin API：容器里不需要运行时改配置，少一个监听面。
+	admin off
+	# 需要 ACME 通知邮箱时在这里写死，或改成环境变量占位（不给默认值会报错）：
+	# email ops@example.com
+}
+
+# QILIN_DOMAIN 由 compose 注入；域名不对时 ACME 会失败，属于刻意的 fail-fast。
+{$QILIN_DOMAIN:qilin.example.com} {
+	encode zstd gzip
+
+	# 32MiB 制品走 base64 上传后约 43MiB，这里留足余量。
+	# 应用自身还有 32MiB 制品上限与 Content-Length 校验，这一层只是别让请求先被截断。
+	request_body {
+		max_size 64MB
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	reverse_proxy qilin:8787 {
+		# 显式覆写 X-Real-IP 为真实直连对端，避免下游依赖可被客户端伪造的头部前缀。
+		header_up X-Real-IP {remote_host}
+		# MCP 的 text/event-stream 与制品下载不要被缓冲。
+		flush_interval -1
+		# 上传链路要等 xray 校验，给足读写时间；比应用自己的 30s 连接超时更宽。
+		transport http {
+			dial_timeout 5s
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	# 访问日志：JSON 到 stdout，由 docker 的 json-file driver 轮转。
+	log {
+		output stdout
+		format json
+	}
+}

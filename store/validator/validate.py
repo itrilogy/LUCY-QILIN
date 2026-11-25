@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -14,7 +15,7 @@ from store.safety import PathEscape, check_relative, safe_join
 from store.semver import SEMVER
 from store.semver import satisfies as _satisfies
 from store.validator.knowledge import check as check_knowledge
-from store.validator.net import probe_url, url_ok
+from store.validator.net import is_allowlisted_url, probe_url, url_check_mode, url_ok
 from store.validator.registry import (
     CLIENTS, KINDS, PLATFORMS, PLUGIN_CAPABILITIES, PLUGIN_TIER_B_ALLOWLIST, PLUGIN_TIERS,
 )
@@ -27,6 +28,11 @@ SECRET_VALUE = re.compile(
 )
 SKIP_DIRS = {".git", "__pycache__"}
 
+# 外部地址探测的预算：单份清单最多探这么多个地址、总共给这么多秒。
+# 没有预算时，一份清单可以把 handler 线程按住几百秒（评审 P1-3）。
+_MAX_PROBES = 20
+_PROBE_BUDGET_SECONDS = 45.0
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -36,6 +42,8 @@ class Finding:
     severity: str = "error"  # error | warning
 
     def line(self) -> str:
+        if self.severity and self.severity != "error":
+            return f"{self.rule}\t{self.path}\t{self.message}\t{self.severity}"
         return f"{self.rule}\t{self.path}\t{self.message}"
 
 
@@ -216,7 +224,7 @@ def _validate_manifest(
     if kind == "runtime" and "any" in platforms:
         report.add("PLATFORM_TOO_BROAD", "platforms", "runtime 不能使用 any")
     if kind in {"mcp", "mcp+skill"}:
-        _mcp(report, manifest, platforms, clients)
+        _mcp(report, manifest, root, platforms, clients, check_files=check_files)
     if kind in {"skill", "mcp+skill"}:
         _skill(report, manifest, root, clients, check_files=check_files)
     if kind == "runtime":
@@ -332,7 +340,7 @@ def _frontmatter(report: Report, root: Path, manifest: dict) -> None:
     description = _yaml_scalar(block, "description")
     summary = str(manifest.get("summary") or "").strip()
     if description and summary and summary not in description and description not in summary:
-        report.add("FRONTMATTER_CONFLICT", "summary", "summary 必须是 frontmatter description 的缩短")
+        report.add("FRONTMATTER_CONFLICT", "summary", "summary 建议是 frontmatter description 的缩短", severity="warning")
     if re.search(r"^(dependency|allowed-tools)\s*:", block, re.M):
         depends = manifest.get("depends") if isinstance(manifest.get("depends"), dict) else {}
         listed = any(depends.get(key) for key in ("store", "external", "skills", "mcp"))
@@ -380,7 +388,32 @@ def _secret_name(name: str) -> bool:
     return lower.endswith(".md") and "key" in lower
 
 
-def _mcp(report: Report, manifest: dict, platforms: list[str], clients: list[str]) -> None:
+_SCRIPT_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".ps1", ".bat")
+
+
+def _is_bundle_script_arg(arg: str) -> bool:
+    """判断 stdio 的参数是否像包内相对脚本路径（例如 sse_bridge.py 或 scripts/run.py）。"""
+    text = arg.strip()
+    if not text or text.startswith(("-", "/", "${", "~")):
+        return False
+    if "://" in text or "=" in text:
+        return False
+    if len(text) > 1 and text[1] == ":" and text[0].isalpha():
+        return False
+    if "/" in text or "\\" in text:
+        return True
+    return text.lower().endswith(_SCRIPT_SUFFIXES)
+
+
+def _mcp(
+    report: Report,
+    manifest: dict,
+    root: Path,
+    platforms: list[str],
+    clients: list[str],
+    *,
+    check_files: bool = False,
+) -> None:
     block = report.guard(manifest.get("mcp"), dict, "MCP_TRANSPORT", "mcp", "缺少 mcp 连接块", None)
     if block is None:
         return
@@ -389,16 +422,29 @@ def _mcp(report: Report, manifest: dict, platforms: list[str], clients: list[str
         report.add("MCP_TRANSPORT", "mcp.transport", "transport 只能是 stdio 或 streamable-http")
     if transport == "streamable-http":
         url = str(block.get("url") or "")
-        if not url.startswith("https://"):
-            report.add("MCP_CONNECT", "mcp.url", "远程 MCP 必须是 https URL")
+        if not (url.startswith("https://") or is_allowlisted_url(url)):
+            report.add("MCP_CONNECT", "mcp.url", "远程 MCP 必须是 https URL（内网 http 需加入 QILIN_FETCH_ALLOW_HOSTS）")
         if SECRET_VALUE.search(url) or "key=" in url or "token=" in url:
             report.add("SECRET_PATTERN", "mcp.url", "URL 里不能带密钥")
         for client in clients:
             if "mcp_http" not in CLIENTS.get(client, set()):
                 report.add("CLIENT_CAPABILITY", "clients", f"{client} 不能连接 streamable-http")
     if transport == "stdio":
-        if not str(block.get("command") or "").strip() or not isinstance(block.get("args"), list):
+        raw_cmd = str(block.get("command") or "").strip()
+        raw_args = block.get("args")
+        if not raw_cmd or not isinstance(raw_args, list):
             report.add("MCP_CONNECT", "mcp.command", "stdio 必须有 command 和 args")
+        elif check_files and manifest.get("kind") == "mcp":
+            for item in raw_args:
+                if not isinstance(item, str) or not _is_bundle_script_arg(item):
+                    continue
+                try:
+                    target = safe_join(root, item)
+                except PathEscape:
+                    report.add("MCP_CONNECT", "mcp.args", f"stdio 脚本路径不合法：{item}")
+                    continue
+                if not target.is_file():
+                    report.add("MCP_CONNECT", "mcp.args", f"stdio 参数引用的随包脚本不存在：{item}")
         if "any" in platforms:
             report.add("PLATFORM_TOO_BROAD", "platforms", "stdio MCP 不能用 any")
         for client in clients:
@@ -681,6 +727,9 @@ def _external(
     check_urls: bool,
     probe: Callable[[str], int | None],
 ) -> None:
+    deadline = time.monotonic() + _PROBE_BUDGET_SECONDS
+    probed = 0
+    mode = url_check_mode() if check_urls else "off"
     for index, item in enumerate(items):
         path = f"depends.external[{index}]"
         entry = report.guard(item, dict, "DEP_GUIDE_MISSING", path, "外部依赖必须是对象", None)
@@ -709,10 +758,21 @@ def _external(
             if one is None:
                 continue
             url = str(one.get("url") or "")
-            if not url.startswith("https://"):
-                report.add("DEP_EXTERNAL_URL", path + ".url", "资源地址必须是 https")
-            elif check_urls and not url_ok(probe(url)):
-                report.add("DEP_EXTERNAL_UNREACHABLE", url, "地址当时打不开")
+            if not (url.startswith("https://") or is_allowlisted_url(url)):
+                report.add("DEP_EXTERNAL_URL", path + ".url", "资源地址必须是 https（内网 http 需加入 QILIN_FETCH_ALLOW_HOSTS）")
+            elif mode != "off":
+                unreachable_severity = "warning" if mode == "warn" else "error"
+                if probed >= _MAX_PROBES:
+                    report.add(
+                        "DEP_EXTERNAL_URL", path + ".url",
+                        f"单份清单最多检查 {_MAX_PROBES} 个外部地址",
+                    )
+                elif time.monotonic() > deadline:
+                    report.add("DEP_EXTERNAL_UNREACHABLE", url, "地址检查超出时间预算", severity=unreachable_severity)
+                else:
+                    probed += 1
+                    if not url_ok(probe(url)):
+                        report.add("DEP_EXTERNAL_UNREACHABLE", url, "地址当时打不开", severity=unreachable_severity)
             platform = one.get("platform")
             if isinstance(platform, str):
                 covered.add(platform)

@@ -13,6 +13,7 @@ from pathlib import Path
 from store.http_api import serve
 from store.mcp_api import handle
 from store.service import Store
+from tests.test_service import bootstrap_admin
 from tests.test_service import SKILL, skill_manifest
 
 PASSWORD = "Passw0rdXyz"
@@ -25,9 +26,7 @@ class ContributionTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.store = Store(root / "store.db", root / "blobs")
         self.addCleanup(self.store.close)
-        _p, _s, self.admin_key = self.store.register_account(
-            "root", "管理员", "管理员", "商店", "审核", PASSWORD,
-        )
+        _admin_profile, self.admin_key = bootstrap_admin(self.store, "root")
         _p, _s, self.publisher_key = self.store.register_account(
             "author", "顾木", "木青", "产品部", "作者", PASSWORD,
         )

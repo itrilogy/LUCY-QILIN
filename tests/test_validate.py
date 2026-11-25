@@ -10,6 +10,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest import mock
 
 from store.validator.net import probe_url
 from store.validator.validate import Release, validate_manifest, validate_path
@@ -152,11 +153,15 @@ class ValidateTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            status = probe_url(f"http://127.0.0.1:{server.server_port}/pandoc", timeout=2)
+            # 默认策略只允许公网，回环要显式放行才能探（评审 P1-3）。
+            with mock.patch.dict("os.environ", {"QILIN_FETCH_POLICY": "any"}):
+                status = probe_url(f"http://127.0.0.1:{server.server_port}/pandoc", timeout=2)
+            blocked = probe_url(f"http://127.0.0.1:{server.server_port}/pandoc", timeout=2)
         finally:
             server.shutdown()
             server.server_close()
         self.assertEqual(status, 200)
+        self.assertIsNone(blocked, "默认策略下回环地址不应被访问")
 
     def test_runtime_missing_asset_and_bad_checksum(self) -> None:
         root = self._tmp("checksum")

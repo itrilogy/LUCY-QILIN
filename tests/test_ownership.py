@@ -12,6 +12,7 @@ from pathlib import Path
 
 from store.errors import StoreError
 from store.service import Store
+from tests.test_service import bootstrap_admin
 from tests.test_service import SUMMARY, skill_manifest
 
 
@@ -26,9 +27,7 @@ class OwnershipTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.store = Store(root / "store.db", root / "blobs")
         self.addCleanup(self.store.close)
-        self.admin_profile, _session, self.admin = self.store.register_account(
-            "root.admin", "管理员", "管理员", "IT", "管理员", "Passw0rdXyz",
-        )
+        self.admin_profile, self.admin = bootstrap_admin(self.store)
         self.alice_profile, _session, self.alice = self.store.register_account(
             "author.alice", "作者甲", "作者甲", "", "", "Passw0rdXyz",
         )

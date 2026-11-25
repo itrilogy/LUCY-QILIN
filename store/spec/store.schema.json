@@ -65,7 +65,7 @@
     "plugin": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["tier", "form", "entry", "patch", "files", "dsh"],
+      "required": ["tier", "form", "patch", "files", "dsh"],
       "properties": {
         "tier": { "enum": ["A", "B", "C"] },
         "form": { "enum": ["host", "client", "both"] },

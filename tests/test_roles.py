@@ -9,7 +9,7 @@ from pathlib import Path
 from store.errors import StoreError
 from store.mcp_api import _visible
 from store.service import Store
-from tests.test_service import SKILL, skill_manifest
+from tests.test_service import SKILL, bootstrap_admin, skill_manifest
 
 
 class RoleTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class RoleTests(unittest.TestCase):
         self.assertNotIn("approve", _visible("publisher"))
 
     def test_admin_can_assign_reviewer(self) -> None:
-        _p, _s, admin_key = self.store.register_account("account-admin", "管理员", "管理员", "商店", "审核", "Passw0rdXyz")
+        _admin_profile, admin_key = bootstrap_admin(self.store, "account-admin")
         profile, _s, publisher_key = self.store.register_account("account-author", "作者", "作者", "产品", "作者", "Passw0rdXyz")
         self.store.set_account_role(admin_key, profile["id"], "reviewer")
         self.assertEqual(self.store.whoami(publisher_key)["role"], "reviewer")

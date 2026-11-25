@@ -19,6 +19,7 @@ import re
 from typing import Callable
 
 from store.blobs import safe_extract
+from store.paths import default_knowledge_root
 from store.safety import PathEscape, safe_join
 
 _BIN_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -85,7 +86,7 @@ def run(
     roots = {
         "WORK": work or _env_path("QILIN_WORK"),
         "SKILLS_ROOT": skills_root or _env_path("QILIN_SKILLS_ROOT"),
-        "KNOWLEDGE_ROOT": knowledge_root or _env_path("QILIN_KNOWLEDGE_ROOT"),
+        "KNOWLEDGE_ROOT": knowledge_root or default_knowledge_root(),
         "BIN_DIR": bin_dir or _env_path("QILIN_BIN_DIR"),
         "MCP_DIR": mcp_dir or _env_path("QILIN_MCP_DIR"),
         "PLUGIN_STAGING": plugin_staging or _env_path("QILIN_PLUGIN_STAGING"),
@@ -180,7 +181,7 @@ def _mcp_add(step: dict, _opener: Callable[..., object]) -> int:
     directory.mkdir(parents=True, exist_ok=True)
     # 白名单：`_expand` 会把 bin_dir、skills_root 等注入路径塞进每个步骤，
     # 不能把它们写进客户端的 MCP 配置。
-    keys = {"id", "transport", "command", "args", "env", "url", "headers", "secrets"}
+    keys = {"id", "transport", "command", "args", "cwd", "env", "url", "headers", "secrets"}
     payload = {key: step[key] for key in keys if key in step}
     (directory / f"{step['id']}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
@@ -294,6 +295,10 @@ def _verify(step: dict, opener: Callable[..., object]) -> int:
                 return 1
         return 0
     if step.get("kind") in {"mcp", "mcp+skill"}:
+        if step.get("kind") == "mcp" and step.get("cwd"):
+            if not Path(str(step["cwd"])).is_dir():
+                print(f"没有找到 MCP 解压目录 {step['cwd']}", file=sys.stderr)
+                return 1
         return _verify_mcp(step, opener)
     return 0
 
@@ -415,8 +420,10 @@ def _list_stdio(step: dict) -> object:
         raise ValueError("command")
     if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
         raise ValueError("args")
+    workdir = str(step["cwd"]) if step.get("cwd") else None
     process = subprocess.Popen(
         [command, *args],
+        cwd=workdir,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -503,9 +510,10 @@ _OPS = {
 }
 
 
-def _expand(step: dict, roots: dict[str, Path | None]) -> dict | None:
-    used: set[str] = set()
+_MISSING = object()
 
+
+def _expand(step: dict, roots: dict[str, Path | None]) -> dict | None:
     def replace(value: object) -> object:
         if not isinstance(value, str):
             return value
@@ -513,9 +521,8 @@ def _expand(step: dict, roots: dict[str, Path | None]) -> dict | None:
         for name, path in roots.items():
             token = "${" + name + "}"
             if token in text:
-                used.add(name)
                 if path is None:
-                    return None
+                    return _MISSING
                 text = text.replace(token, str(path))
         return text
 
@@ -523,13 +530,13 @@ def _expand(step: dict, roots: dict[str, Path | None]) -> dict | None:
     for key, value in step.items():
         if isinstance(value, list):
             expanded[key] = [replace(item) if not isinstance(item, dict) else item for item in value]
-            if any(item is None for item in expanded[key]):
+            if any(item is _MISSING for item in expanded[key]):
                 return None
         elif isinstance(value, dict):
             expanded[key] = value
         else:
             replaced = replace(value)
-            if replaced is None:
+            if replaced is _MISSING:
                 return None
             expanded[key] = replaced
     for name in ("BIN_DIR", "MCP_DIR", "SKILLS_ROOT", "KNOWLEDGE_ROOT", "PLUGIN_STAGING"):

@@ -9,6 +9,7 @@ from unittest import mock
 
 from store.errors import StoreError
 from store.service import Store
+from tests.test_service import bootstrap_admin
 
 PASSWORD = "Passw0rdXyz"
 
@@ -20,10 +21,8 @@ class AuthCacheTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.store = Store(root / "store.db", root / "blobs")
         self.addCleanup(self.store.close)
-        # 第一位注册的账号是管理员，第二位才是作者。
-        _admin_profile, _session, self.admin = self.store.register_account(
-            "root.admin", "管理员", "管理员", "IT", "管理员", PASSWORD,
-        )
+        # 管理员由引导创建；自助注册只产生作者。
+        _admin_profile, self.admin = bootstrap_admin(self.store)
         self.profile, _session, self.key = self.store.register_account(
             "author.one", "顾木", "木青", "产品", "作者", PASSWORD,
         )

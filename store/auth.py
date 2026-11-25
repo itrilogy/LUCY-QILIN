@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
 import time
@@ -41,7 +42,9 @@ class AuthMixin:
         return principal, token
     def principal_from_token(self, token: str) -> Principal | None:
         with self._read():
-            return self._principal_from_token(token)
+            principal = self._principal_from_token(token)
+        self._flush_prefix_backfill()
+        return principal
     def prepare_token(self, token: str) -> None:
         """进入全局锁之前，先把需要联网的凭据验掉。
 
@@ -90,8 +93,9 @@ class AuthMixin:
         if row is None:
             return None
         if int(row["expires_at"]) < int(time.time()):
-            self._db.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash(token),))
-            self._db.commit()
+            # 读路径不写库：旧实现在这里 DELETE + commit，等于把只读事务升级成
+            # 写事务，并发时会撞 SQLITE_BUSY_SNAPSHOT（busy_timeout 对它无效）。
+            # 过期行交给 _prune_stale_uploads 按天清理。
             return None
         if row["disabled_at"]:
             raise StoreError("ACCOUNT_DISABLED", "这个用户已停用。")
@@ -106,9 +110,7 @@ class AuthMixin:
             return None
         now = int(time.time())
         if int(row["expires_at"]) < now or int(row["access_exp"]) < now:
-            if int(row["expires_at"]) < now or not row["refresh_token"]:
-                self._db.execute("DELETE FROM hub_logins WHERE token_hash = ?", (_hash(token),))
-                self._db.commit()
+            # 同上：过期行由清理逻辑删除，读路径只负责判定"不可用"。
             return None
         return Principal(row["sub"], row["name"], row["role"])
     def _account_from_key(self, key: str) -> Principal | None:
@@ -147,12 +149,16 @@ class AuthMixin:
         ).fetchall()
         for legacy in rows:
             if key_matches(key, legacy["key_salt"], legacy["key_hash"]):
-                # 顺手补上指纹：下次这把 KEY 走上面的快路径。
-                self._db.execute(
-                    "UPDATE accounts SET key_prefix = ? WHERE id = ?",
-                    (fingerprint, legacy["id"]),
-                )
-                self._db.commit()
+                # 顺手补上指纹：下次这把 KEY 走上面的快路径。读事务里不能写，
+                # 记在线程本地，等事务结束由 `_flush_prefix_backfill` 补。
+                if self._db.in_transaction:
+                    self._local.pending_prefix = (legacy["id"], fingerprint)
+                else:
+                    self._db.execute(
+                        "UPDATE accounts SET key_prefix = ? WHERE id = ?",
+                        (fingerprint, legacy["id"]),
+                    )
+                    self._db.commit()
                 if legacy["disabled_at"]:
                     raise StoreError("ACCOUNT_DISABLED", "这个用户已停用。")
                 principal = Principal(legacy["id"], legacy["display_name"], legacy["role"])
@@ -185,7 +191,7 @@ class AuthMixin:
     def _account_row(self, account_id: str) -> sqlite3.Row:
         row = self._db.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
         if row is None:
-            raise StoreError("VERSION_UNAVAILABLE", "没有这个用户。")
+            raise StoreError("RESOURCE_NOT_FOUND", "没有这个用户。")
         return row
     def _keep_an_admin(self, leaving: str) -> None:
         others = self._db.execute(
@@ -207,26 +213,31 @@ class AuthMixin:
         return Principal(row["id"], row["name"], row["role"])
     def whoami(self, token: str) -> dict:
         with self._read():
-            if not token:
-                return {"role": "anonymous", "source": "none"}
-            principal = self._principal_from_token(token)
-            if principal is None:
-                return {"role": "anonymous", "source": "none"}
-            account = self._db.execute(
-                "SELECT * FROM accounts WHERE id = ?", (principal.id,),
-            ).fetchone()
-            if account is not None:
-                profile = self._profile_from_row(account)
-                profile["source"] = "account"
-                return profile
-            return {
-                "id": principal.id,
-                "name": principal.name,
-                "username": "",
-                "role": principal.role,
-                "source": "hub" if self._identity is not None else "local",
-                "key_ready": False,
-            }
+            profile = self._whoami_locked(token)
+        self._flush_prefix_backfill()
+        return profile
+
+    def _whoami_locked(self, token: str) -> dict:
+        if not token:
+            return {"role": "anonymous", "source": "none"}
+        principal = self._principal_from_token(token)
+        if principal is None:
+            return {"role": "anonymous", "source": "none"}
+        account = self._db.execute(
+            "SELECT * FROM accounts WHERE id = ?", (principal.id,),
+        ).fetchone()
+        if account is not None:
+            profile = self._profile_from_row(account)
+            profile["source"] = "account"
+            return profile
+        return {
+            "id": principal.id,
+            "name": principal.name,
+            "username": "",
+            "role": principal.role,
+            "source": "hub" if self._identity is not None else "local",
+            "key_ready": False,
+        }
     def register_account(
         self,
         username: str,
@@ -236,8 +247,80 @@ class AuthMixin:
         job_title: str = "",
         password: str = "",
     ) -> tuple[dict, str, str]:
+        """自助注册。只产生作者；管理员只能由 `store init-admin` 或现有管理员授予。
+
+        `QILIN_REGISTRATION=closed` 时拒绝。空库必须先引导管理员这条规则
+        由 HTTP 入口把关（见 `http_api` 的 `/v1/account`），因为那是公开注册的
+        引导顺序；服务层这里只表达"注册开关"。
+        """
         with self._lock:
+            if self.registration_mode() == "closed":
+                raise StoreError("REGISTRATION_CLOSED", "本店暂不开放注册，请联系管理员开通账号。")
             return self._register_account(username, real_name, nickname, department, job_title, password)
+
+    @staticmethod
+    def registration_mode() -> str:
+        """注册开关：QILIN_REGISTRATION=open|closed，非法值按 open 处理。"""
+        value = (os.environ.get("QILIN_REGISTRATION") or "open").strip().lower()
+        return value if value in {"open", "closed"} else "open"
+
+    def has_admin(self) -> bool:
+        with self._read():
+            return self._db.execute(
+                "SELECT 1 FROM accounts WHERE role = 'admin' AND disabled_at IS NULL LIMIT 1"
+            ).fetchone() is not None
+
+    def create_admin_account(
+        self,
+        username: str,
+        password: str,
+        real_name: str,
+        nickname: str,
+        department: str = "",
+        job_title: str = "",
+    ) -> tuple[dict, str, str]:
+        """CLI 引导：创建管理员，返回 (profile, 口令, KEY)。
+
+        只在还没有可用管理员时允许（管理员被停用或没有管理员时可以再来一次，
+        这是刻意的恢复路径）。之后的账号由管理员在「用户管理」里授予或直接开号。
+        """
+        with self._lock:
+            if self.has_admin():
+                raise StoreError("ROLE_FORBIDDEN", "商店已经有管理员了，请用现有管理员授予角色。")
+            profile, _session, key = self._register_account(
+                username, real_name, nickname, department, job_title, password, role="admin",
+            )
+            # 返回口令而不是会话：调用方（CLI）要把口令打印一次给人。
+            return profile, password, key
+
+    def create_account(
+        self,
+        token: str,
+        username: str,
+        real_name: str,
+        nickname: str,
+        role: str = "publisher",
+    ) -> dict:
+        """管理员建号：口令由商店生成，只在这次响应里出现一次。"""
+        from store.accounts import issue_password, password_of, username_of
+
+        with self._lock:
+            admin = self._require(token, ADMIN_ROLES)
+            if role not in PUBLISHER_ROLES:
+                raise StoreError("ROLE_FORBIDDEN", "角色只能是作者、审核或管理员。")
+            username = username_of(username)
+            password = password_of(issue_password(username), username)
+            profile, _session, _key = self._register_account(
+                username, real_name, nickname, "", "", password, role=role,
+            )
+            self._audit(admin.id, "create_account", None, None)
+            return {
+                "id": profile["id"],
+                "username": profile["username"],
+                "nickname": profile["nickname"],
+                "role": profile["role"],
+                "password": password,
+            }
     def _register_account(
         self,
         username: str,
@@ -246,6 +329,7 @@ class AuthMixin:
         department: str,
         job_title: str,
         password: str,
+        role: str = "publisher",
     ) -> tuple[dict, str, str]:
         from store.accounts import make_key, optional_text, password_of, person_name, username_of
 
@@ -257,7 +341,8 @@ class AuthMixin:
         department = optional_text(department, "部门")
         job_title = optional_text(job_title, "岗位")
         password = password_of(password, username)
-        role = "admin" if self._db.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is None else "publisher"
+        if role not in PUBLISHER_ROLES:
+            raise StoreError("ROLE_FORBIDDEN", "角色只能是作者、审核或管理员。")
         account_id = "u_" + secrets.token_hex(8)
         key, salt, hashed, fingerprint = self._fresh_key()
         password_salt, password_hash = make_key(password)

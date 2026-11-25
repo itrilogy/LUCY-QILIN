@@ -41,6 +41,18 @@ def skill_manifest(**overrides: object) -> dict:
 
 SKILL = f"---\nname: gov\ndescription: {SUMMARY}\nversion: 3.2.0\n---\n\n# 公文\n"
 
+# 空库不再把自助注册者变成管理员：管理员由 `store init-admin` 引导。
+# 测试里用这个夹具等价地建一个，后续 register_account 都是作者。
+ADMIN_PASSWORD = "Init-Pass-2026"
+
+
+def bootstrap_admin(store, username: str = "root.admin", nickname: str = "管理员"):
+    """返回 (profile, key)，角色是 admin。"""
+    profile, _password, key = store.create_admin_account(
+        username, ADMIN_PASSWORD, "管理员", nickname,
+    )
+    return profile, key
+
 
 class ServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -178,7 +190,7 @@ class HttpTests(ServiceTests):
         self.assertFalse(archive.is_file())
         with self.assertRaises(StoreError) as caught:
             self.store.finish_submit(self.publisher, submission_id, probe=lambda url: 200)
-        self.assertEqual(caught.exception.rule, "VERSION_UNAVAILABLE")
+        self.assertEqual(caught.exception.rule, "SUBMISSION_STATE_INVALID")
 
     def _uploading(self, manifest: dict, archive: bytes) -> tuple[str, Path]:
         started = self.store.begin_submit(

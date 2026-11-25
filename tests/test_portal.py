@@ -33,6 +33,28 @@ class PortalApiTests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
 
+    def test_favicon_and_app_icons_are_served(self) -> None:
+        expected = {
+            "/favicon.ico": "image/x-icon",
+            "/design/favicon.svg": "image/svg+xml",
+            "/design/apple-touch-icon.png": "image/png",
+        }
+        for path, mime in expected.items():
+            with self.subTest(path=path):
+                with urllib.request.urlopen(self.base + path) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertIn(mime, response.headers.get("Content-Type", ""))
+                    payload = response.read()
+                self.assertGreater(len(payload), 100, path)
+        with urllib.request.urlopen(self.base + "/favicon.ico") as response:
+            self.assertTrue(response.read().startswith(b"\x00\x00\x01\x00"), "必须是 ICO 容器")
+        with urllib.request.urlopen(self.base + "/") as response:
+            page = response.read().decode()
+        self.assertIn('rel="icon"', page)
+        self.assertIn("/design/favicon.svg", page)
+        self.assertIn('rel="apple-touch-icon"', page)
+        self.assertIn('name="theme-color"', page)
+
     def test_page_is_served_with_the_same_api(self) -> None:
         with urllib.request.urlopen(self.base + "/") as response:
             csp = response.headers.get("Content-Security-Policy", "")
@@ -40,9 +62,10 @@ class PortalApiTests(unittest.TestCase):
         self.assertIn("栖林", page)
         self.assertIn("我的提交", page)
         self.assertIn("货架陈列已经发布的技能、MCP、知识包与插件", page)
-        self.assertIn("均需要登录后，才能在页面进行下载", page)
+        self.assertIn("产品下载不需要登录", page)
         self.assertIn("用户管理", page)
         self.assertIn("商店 MCP", page)
+
         self.assertIn("装到这台电脑", page)
         self.assertIn("用户管理", page)
         self.assertIn("口令", page)
@@ -101,6 +124,10 @@ class PortalApiTests(unittest.TestCase):
             self.assertIn("javascript", response.headers.get("Content-Type", ""))
             app_js = response.read().decode()
         self.assertIn("/v1/catalog", app_js)
+        # 前端可用性回归：路由监听 hashchange，登录/注册支持回车提交。
+        self.assertIn("hashchange", app_js)
+        self.assertIn('submitOnEnter("login-box", "login-submit")', app_js)
+        self.assertIn('submitOnEnter("create-panel", "reg-submit")', app_js)
         self.assertIn("请先登录", app_js)
         self.assertIn("从实验室账号进来的", app_js)
         self.assertIn("在 DSH 的 Plugins 里安装", app_js)

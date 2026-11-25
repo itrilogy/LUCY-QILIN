@@ -24,6 +24,11 @@ class AccountTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.store = Store(root / "store.db", root / "blobs")
         self.addCleanup(self.store.close)
+        # 空库不再把 HTTP 注册者变成管理员：管理员只能由 store init-admin 建。
+        # 这里直接在 Store 层建，等价于 CLI 引导；随后的 /v1/account 都是作者。
+        self.admin_profile, _password, self.admin_key = self.store.create_admin_account(
+            "admin.one", PASSWORD, "沈林", "林深", "数字化", "审核",
+        )
         self.server = serve(self.store)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -31,25 +36,21 @@ class AccountTests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
 
-    def test_first_person_gets_one_generated_key(self) -> None:
-        admin, admin_cookie, admin_key = self._create("admin.one", "沈林", "林深", "数字化", "审核")
-        self.assertEqual(admin["role"], "admin")
-        self.assertEqual(admin["real_name"], "沈林")
-        self.assertEqual(admin["nickname"], "林深")
-        self.assertEqual(admin["department"], "数字化")
-        self.assertIn(self.base + "/mcp", json.dumps(admin["mcp"]))
-        self.assertIn("Bearer " + admin_key, json.dumps(admin["mcp"]))
-        author, _cookie, author_key = self._create("author.one", "顾木", "木青", "产品")
-        self.assertEqual(author["role"], "publisher")
-        self.assertNotEqual(admin_key, author_key)
+    def test_registration_creates_publisher_and_admin_comes_from_bootstrap(self) -> None:
+        admin_cookie = self._login("admin.one")
         me = self._get("/v1/me", admin_cookie)
+        self.assertEqual(me["role"], "admin")
         self.assertEqual(me["username"], "admin.one")
         self.assertEqual(me["name"], "林深")
         self.assertEqual(me["source"], "account")
         self.assertTrue(me["key_ready"])
-        self.assertEqual(me["store_key"], admin_key)
-        hidden = self._open("/v1/accounts", expect=403)
-        self.assertEqual(hidden["rule"], "ROLE_FORBIDDEN")
+        self.assertEqual(me["store_key"], self.admin_key)
+        self.assertEqual(me["mcp_url"], self.base + "/mcp")
+        author, _cookie, author_key = self._create("author.one", "顾木", "木青", "产品")
+        self.assertEqual(author["role"], "publisher", "自助注册只产生作者")
+        self.assertNotEqual(self.admin_key, author_key)
+        hidden = self._open("/v1/accounts", expect=401)
+        self.assertEqual(hidden["rule"], "AUTH_REQUIRED")
         names = self._get("/v1/accounts", admin_cookie)["items"]
         self.assertEqual([item["display_name"] for item in names], ["林深", "木青"])
         denied = self._open("/v1/accounts/manage", cookie=self._login("author.one"), expect=403)
@@ -61,8 +62,25 @@ class AccountTests(unittest.TestCase):
         self._post(f"/v1/accounts/{author_row['id']}/role", {"role": "admin"}, cookie=admin_cookie)
         self.assertEqual(self._get("/v1/me", self._login("author.one"))["role"], "admin")
 
+    def test_anonymous_is_401_and_wrong_role_is_403(self) -> None:
+        # 401 = 没登录/凭据失效，403 = 登录了但角色不够。客户端据此决定
+        # 是重开登录框，还是只提示"权限不够"。
+        request = urllib.request.Request(self.base + "/v1/accounts")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(caught.exception.code, 401)
+        self.assertEqual(json.load(caught.exception)["rule"], "AUTH_REQUIRED")
+        self.assertEqual(
+            caught.exception.headers.get("WWW-Authenticate"), 'Bearer realm="qilin"',
+        )
+        caught.exception.close()
+        self._create("author.one", "顾木", "木青")
+        denied = self._open("/v1/accounts", cookie=self._login("author.one"), expect=403)
+        self.assertEqual(denied["rule"], "ROLE_FORBIDDEN")
+
     def test_key_is_the_bearer_and_reissue_replaces_the_only_one(self) -> None:
-        _admin, cookie, key = self._create("admin.one", "沈林", "林深")
+        cookie = self._login("admin.one")
+        key = self.admin_key
         me = self._send("/v1/me", bearer=key)
         self.assertEqual(me["role"], "admin")
         self.assertEqual(me["store_key"], key)
@@ -80,7 +98,8 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self._get("/v1/me", new_cookie)["store_key"], replaced["key"])
 
     def test_profile_can_change_without_touching_the_key(self) -> None:
-        _admin, cookie, key = self._create("admin.one", "沈林", "林深", "数字化")
+        cookie = self._login("admin.one")
+        key = self.admin_key
         updated = self._post("/v1/account/profile", {
             "real_name": "沈林深",
             "nickname": "深树",
@@ -99,7 +118,7 @@ class AccountTests(unittest.TestCase):
             "username": "admin.one", "real_name": "沈林", "nickname": "林深", "key": "my-own-key",
         }, expect=400)
         self.assertEqual(chosen["rule"], "KEY_INVALID")
-        _admin, cookie, _key = self._create("admin.one", "沈林", "林深")
+        cookie = self._login("admin.one")
         again = self._post("/v1/account", {
             "username": "admin.one", "real_name": "另一个", "nickname": "另一个",
         }, expect=400)
@@ -133,7 +152,8 @@ class AccountTests(unittest.TestCase):
             "password": PASSWORD, "password_again": NEXT_PASSWORD,
         }, expect=400)
         self.assertEqual(mismatch["rule"], "PASSWORD_MISMATCH")
-        _admin, cookie, key = self._create("admin.one", "沈林", "林深")
+        cookie = self._login("admin.one")
+        key = self.admin_key
         using_key = self._post("/v1/login", {"username": "admin.one", "password": key}, expect=400)
         self.assertEqual(using_key["rule"], "PASSWORD_MISMATCH")
         changed = self._post("/v1/account/password", {
@@ -149,7 +169,8 @@ class AccountTests(unittest.TestCase):
     def test_admin_resets_another_password_without_keeping_it(self) -> None:
         from store.accounts import password_problems
 
-        admin, admin_cookie, _admin_key = self._create("admin.one", "沈林", "林深")
+        admin = self.admin_profile
+        admin_cookie = self._login("admin.one")
         author, author_cookie, author_key = self._create("author.one", "顾木", "木青")
         forbidden = self._post(
             f"/v1/accounts/{author['id']}/password", {}, cookie=author_cookie, expect=403,

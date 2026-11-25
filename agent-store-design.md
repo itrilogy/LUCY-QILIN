@@ -2,7 +2,8 @@
 
 规格版本：`store-spec/1`  
 日期：2026-11-11  
-修订：2026-11-12。上架规范只由商店 MCP 下发（`get_spec` 与 `qilin://spec/`）。技能正文不转载上架步骤。页面下载须先登录；安装器仍按步骤里的制品地址下载。  
+修订：2026-11-23。上架规范只由商店 MCP 下发（`get_spec` 与 `qilin://spec/`）。技能正文不转载上架步骤。制品地址匿名可下载（`GET /v1/artifacts/...` 不校验凭据）；页面的「安装说明」需登录后才请求安装计划。本次增补 4.9.1 知识包入库与 `qilin://spec/knowledge-intake`。  
+修订：2026-11-24。`/mcp` 改为纯无状态会话并支持 `2025-11-25` 协议协商；明确 `kind=mcp` 口径 A（含随包脚本的 `stdio` MCP 走单 zip 制品与 `${MCP_DIR}/<id>/<version>` 解压，纯远程无文件 MCP 无制品）；客户端表补充 `antigravity`；`validate` 支持可选 `files`/`skill_md` 上传前跨文件预检，`withdraw` 扩展支持 `uploading`/`rejected`；拆分细粒度错误码并新增消费者问题反馈闭环（`reports` 表与 6 个反馈工具）。  
 状态：供实现与改造使用的约定。未写入本文的类型、工具、步骤，一律拒绝，不在实现时临场发明。
 
 这份文档同时干三件事：
@@ -64,7 +65,7 @@ KEY 不由本人编，也不由管理员抄给人。创建账号时商店另生�
 - 左栏「连接」在生成的那一次给出能交给 AI 工具的商店 MCP 配置。配置里的 `Authorization: Bearer` 就是这把 KEY。工具参数里没有密钥字段，工具结果里不回显 KEY。作者的 KEY 和审核的 KEY 不要装在同一个 AI 工具里。
 - 重新生成会作废原来的那一把，并删掉旧会话。这不是第二把。请求里若自己带了 KEY，拒收（`KEY_INVALID`）。KEY 与别人重复则拒收（`KEY_TAKEN`）。
 - 用户名须以小写字母开头，3 到 32 位（`USERNAME_INVALID` / `USERNAME_TAKEN`）。姓名和昵称不能空，资料字段不超过 64 个字（`NAME_INVALID`）。
-- 匿名连接可以查找已发布内容，也可以读取上架规范，不能上传。
+- 匿名连接可以查找已发布内容，也可以读取上架规范，不能上传。`AUTH_REQUIRED`（401）表示"没登录/凭据无效"，`ROLE_FORBIDDEN`（403）表示"登录了但角色不够"；客户端据此决定是重开登录还是提示权限。
 - 下载不需要 KEY：制品地址匿名可下载，安装器也不带口令。发布、审核、用户管理和写操作需要 KEY。货架的「安装说明」在未登录时不请求安装计划；AI 工具侧的浏览、下载、使用走商店 MCP，说明在「连接」菜单。
 - `GET /v1/artifacts/<id>/<version>` 仍不要求登录。安装器下载 `install_plan` 里的地址时不带口令。把这一刀切到制品地址上，会让安装步骤里的下载失败。页面动作和制品地址是两件事，不要只改文案假装 HTTP 已经要求登录。
 - 清单里的 `author.display_name` 由作者填写；`author.publisher_id` 以登录身份为准。两者冲突则拒收（规则 `AUTHOR_MISMATCH`）。作者不能冒充别人。
@@ -91,7 +92,7 @@ AI 工具连接商店 MCP（`streamable-http`，`POST /mcp`）。「连接」页
 }
 ```
 
-握手至少包括 `initialize`、`notifications/initialized`、`ping`、`tools/list`、`tools/call`、`resources/list`、`resources/read`。`initialize` 的 `capabilities` 同时声明 `tools` 和 `resources`。服务器在响应里给出 `Mcp-Session-Id`。`GET /mcp` 返回 405，因为没有服务器主动推送。
+握手至少包括 `initialize`、`notifications/initialized`、`ping`、`tools/list`、`tools/call`、`resources/list`、`resources/read`。`initialize` 的 `capabilities` 同时声明 `tools` 和 `resources`，支持协议版本 `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`（`initialize` 自身承担版本协商，不受请求头版本预检阻断）。商店 MCP 采用纯无状态请求处理：响应不下发 `Mcp-Session-Id`，客户端若携带任意历史 `Mcp-Session-Id` 头亦直接放行而不回 404，避免长会话过期或服务重启打断连接。`GET /mcp` 返回 405，因为没有服务器主动推送。
 
 ---
 
@@ -150,9 +151,9 @@ published
 | `new_version` | 新的 semver，或覆盖尚未发布的同一版本 | 多一个可选版本。技能包是一整份 zip。工具若按平台分文件，这份提交里的平台资产一并发布 |
 | `add_platform` | 某个**已发布**版本要增加一个还没有的平台 | 只增加该平台的制品。清单正文必须与已发布版本一致，不一致则 `PLATFORM_SCOPE`。该平台已存在则 `PLATFORM_TAKEN` |
 
-技能包一个版本只有一份 zip，平台是这份 zip 所声明的适用平台列表，不能对同一版本拆成多份 zip。某个平台的脚本真的不同，就另发一个版本，并在 `changes` 里写明。
+技能包、知识包、插件以及含随包脚本的 `stdio` MCP 一个版本只有一份 zip，平台是这份 zip 所声明的适用平台列表，不能对同一版本拆成多份 zip。某个平台的脚本真的不同，就另发一个版本，并在 `changes` 里写明。
 
-MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多份资产，每份对应一个平台。缺的平台以后用 `add_platform` 补，不必为了补一个 Windows 包去改已经发出的 macOS 文件。
+只有 `runtime` 按平台管理多份制品资产：一个版本可以有多份资产，每份对应一个平台。缺的平台以后用 `add_platform` 补，不必为了补一个 Windows 包去改已经发出的 macOS 文件。技能、MCP、知识包、插件均不支持 `add_platform`（`VERSION_IMMUTABLE`）。
 
 ### AI 工具如何选版本
 
@@ -245,7 +246,8 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 | `claude-desktop` | `mcp_stdio`、`mcp_http` |
 | `cursor` | `mcp_stdio`、`mcp_http` |
 | `deepseek-harness` | `skill_dir`、`mcp_stdio`、`mcp_http`、`local_bin`、`plugin` |
-| `generic` | 作者在清单里另外写 `client_caps`，不能靠它绕过校验 |
+| `antigravity` | `skill_dir`、`mcp_stdio`、`mcp_http`、`local_bin` |
+| `generic` | `mcp_stdio`、`mcp_http`、`local_bin`（不含 `skill_dir` 与 `plugin`，不能靠它绕过能力闭合校验） |
 
 上传时做能力闭合（`CLIENT_CAPABILITY`）：
 
@@ -288,7 +290,7 @@ MCP 与 `runtime` 这类工具按平台管理制品：一个版本可以有多�
 
 调用形式写在 `invoke` 里，不写在一段散文里。官方注册中心的 [`server.json`](https://github.com/modelcontextprotocol/registry) 字段与这里的对应关系：`remotes[]` → `mcp.url`；`packages[]` → 若命令来自 npm/PyPI，把 `command`/`args` 写成 `npx` 或 `uvx` 的具体参数。商店仍然自己存这份清单，不把发布委托给公网注册中心。
 
-纯远程 MCP 可以只上传 `manifest.json`，没有 zip。
+纯远程 `streamable-http` MCP（或仅调用系统既有命令、无随包脚本的 `stdio` MCP）可以只交 `manifest.json`（`submit_package` 传空 `files: {}` 或 `begin_submit` 传 `byte_size=0`），没有 zip 制品；此类无制品版本调用 `artifact` 返回 `KIND_NO_ARTIFACT`（HTTP 400）。含随包桥接脚本或代码的 `stdio` MCP 按单份 zip 提交，`mcp.args` 中引用的相对路径脚本必须在包内存在（缺失报 `MCP_CONNECT`）；发布后 `artifact` 返回该 zip 地址，`install_plan` 先生成 `download` 与 `unpack`（解压至 `${MCP_DIR}/<id>/<version>`），再把相对脚本参数重写为解压目录路径后执行 `mcp_add` 与 `verify`。内网部署下配置在 `QILIN_FETCH_ALLOW_HOSTS` 白名单内的主机允许使用 `http://` 地址。
 
 ### 4.4 `kind=skill` 纯技能
 
@@ -395,8 +397,8 @@ platform/            可选，且必须覆盖 clients 里的每一个工具
 |---|---|---|
 | 结构 | `name`、`version_range`、`detect`、`install_guide`、`resources` 都有；`detect` 是字符串数组，不是一条 shell | `DEP_GUIDE_MISSING` |
 | 指南 | `install_guide` 至少 20 字，并且包含依赖名称 | `DEP_GUIDE_MISSING` |
-| 地址 | 每个 `url` 必须是 `https` | `DEP_EXTERNAL_URL` |
-| 可达 | `finish_submit` 对每个 URL 做 HEAD，失败再 GET，超时 10 秒；2xx/3xx 才算通过。打不开不退回、不删制品，提交留在 `uploading`，同一条可以再调一次。这次检查不占着商店的锁 | `DEP_EXTERNAL_UNREACHABLE` |
+| 地址 | 每个 `url` 必须是 `https`（列在 `QILIN_FETCH_ALLOW_HOSTS` 白名单内的内网主机允许 `http`） | `DEP_EXTERNAL_URL` |
+| 可达 | `finish_submit` 对每个 URL 做 HEAD，失败再 GET，超时 5 秒；2xx 才算通过。默认只访问公网地址（回环、私网、链路本地、元数据地址一律不访问），内网资源要用 `QILIN_FETCH_ALLOW_HOSTS` 开白名单；重定向每跳重新校验且不许 https 降级。单份清单最多检查 20 个地址、总预算 45 秒。可通过 `QILIN_URL_CHECK` 控制策略：`strict`（默认）下打不开不退回、不删制品，提交留在 `uploading` 可重试；`warn`（内网离线环境推荐）下记 warning 不阻断转 `pending`，交由审核人工复核；`off` 下跳过外部探测。这次检查不占着商店的锁 | `DEP_EXTERNAL_UNREACHABLE` |
 | 平台覆盖 | 产品声明的每个平台，至少有一条 `platform` 匹配或为 `any` 的 resource | `DEP_RESOURCE_GAP` |
 
 服务器**不运行** `detect`。检测发生在用户电脑上，是安装步骤 `ensure_bin` 的事。上传时的「检测」指：指南和地址齐、地址当时打得开。
@@ -467,7 +469,19 @@ platform/            可选，且必须覆盖 clients 里的每一个工具
 
 链接只认 `[[篇名]]`、`[[篇名\|显示]]`、`[[篇名#标题]]`，篇名是文件名去掉 `.md`。每一条都必须对上包里的一篇（`NOTE_LINK`）；带 `#标题` 时，目标篇必须真有这个标题。别名不算篇名。代码块与行内代码里的例子不查。没有任何入链的篇（入口除外）记 warning `NOTE_ORPHAN`，不阻断。商店不检查文章好不好、标签够不够细；那些留在生产技能里。
 
-安装步骤与技能包相同的下载和解压，目录是 `${KNOWLEDGE_ROOT}/<id>/<version>`，然后核对入口文件在。不列工具，不写连接。环境变量 `QILIN_KNOWLEDGE_ROOT`。
+安装步骤与技能包相同的下载和解压，目录是 `${KNOWLEDGE_ROOT}/<id>/<version>`，然后核对入口文件在。不列工具，不写连接。环境变量 `QILIN_KNOWLEDGE_ROOT`；未设置时使用全局默认 `~/.qilin/knowledge`，与 DSH 的知林插件同一约定。
+
+`kind=knowledge` 的 `install_plan` 另带 `post_install` 数组。第一项 `op` 为 `knowledge_intake`，含 `path`、`id`、`version`、`tool`、`skill`、`required: false`。安装器只执行 `steps`，不执行 `post_install`；它由 AI 客户端判断本机是否有知识包管理插件/技能后调用。
+
+### 4.9.1 知识包入库（intake）
+
+知识包下载并解压后，如果客户端已有知识包管理插件/技能（约定：工具名 `knowledge_intake`，技能名 `zhilin-intake`），应调用它完成入库；没有就保持目录形态，任何扫描知识根的阅读器仍能读到。
+
+- 入库只做「校验 → 复制到主根 → 原子更新 `library.json`」，不修改包内文件，不移动源目录；重复调用幂等。
+- 知识根是用户级目录，不跟随 Session 的 cwd。`QILIN_KNOWLEDGE_ROOT` 未设置时，商店安装器与插件都用 `~/.qilin/knowledge`。
+- 失败码：`BAD_MANIFEST`、`BAD_ENTRY`、`TOO_LARGE`、`TARGET_EXISTS`、`COPY_FAILED`。包本身不合格时不要重试；同 id/version 已存在且清单不同，让用户决定保留哪一份。
+- 密级 `security_level` 是声明，不是访问控制；入库不得声称已经按密级隔离。
+- 协议正文由 `qilin://spec/knowledge-intake` 下发；它只处理「下载之后」，不替代第 4.9 节的字段校验。
 
 ### 4.10 知识树
 
@@ -525,28 +539,37 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | `resolve` | 参数：`id`、`client`、`platform`、`version`（可选，精确号或范围）。按第 3.1 节返回 `candidates` 和 `selected`。技能包和工具都走这一步 |
 | `describe` | 参数：`id`、`version`（必填，不接受「最新」这种省略）。返回该版本的公开清单：只含商店认识的顶层字段，`author` 只留 `display_name`。商店还不认识的顶层字段不出现在这里，审核单里仍保留 |
 | `install_plan` | 参数：`id`、`version`（必填精确号）、`client`、`platform`。版本必须先由 `resolve` 或调用方选定。平台不在该版本里返回 `PLATFORM_MISMATCH`，不生成步骤 |
-| `artifact` | 参数：`id`、`version`、`platform`。返回该平台制品的短期 URL 和 sha256。`any` 的技能包忽略具体平台、返回那一份 zip |
+| `artifact` | 参数：`id`、`version`、`platform`。返回制品的 URL 和 sha256（不把整包读入内存）。zip 类制品忽略具体平台返回那一份 zip；纯远程无文件 MCP 返回 `KIND_NO_ARTIFACT`；若已发布记录对应的磁盘制品缺失或摘要损坏返回 `ARTIFACT_MISSING`（HTTP 503） |
+| `report_problem` | 参数：`id`、`version`、`category`（`install_failed`/`artifact_missing`/`doc_mismatch`/`runtime_error`/`other`）、`summary`，以及可选 `steps`、`client`、`platform`、`contact`。匿名与已登录角色均可向曾发布过的版本提交问题反馈，带限流与密钥扫描（命中报 `SECRET_PATTERN`），返回 `report_id` |
+| `get_report` | 参数：`report_id`。查询单条反馈的状态（`open`/`triaged`/`resolved`/`rejected`）与处理结论；按调用方身份裁剪内部字段 |
+
+已登录任意角色（`member`/`publisher`/`reviewer`/`admin`）：
+
+| 工具 | 作用 |
+|---|---|
+| `list_my_reports` | 列出当前账号自己提交过的问题反馈与处理结论 |
 
 `publisher`（作者；`reviewer`/`admin` 继承）：
 
 | 工具 | 作用 |
 |---|---|
-| `validate` | 只传 `manifest.json`。不入库。返回 `ok`、`rules` 和 `findings`（`rule`、`path`、`message`、`severity`）。还有 error 就改包再调，不要上传 |
+| `validate` | 传 `manifest`，并可选传 `files`（相对路径到 base64）或 `skill_md`（`SKILL.md` 原文）在上传前完成跨文件全量预检。不入库。返回 `ok`、`scope`、`rules` 和 `findings`（`rule`、`path`、`message`、`severity`）。还有 error 就改包再调，不要上传 |
 | `submit_package` | 小包完全走 MCP：参数为清单、`files`（相对路径到 base64 内容）和可选的 `submit_kind`。服务端直接校验、打包、入库，不需要 CLI 或终端 PUT；单次文件合计上限 8MiB。 |
-| `begin_submit` | 参数：`submit_kind`（`new_version` 或 `add_platform`）、清单文本、制品字节数、本次涉及的 `platforms`。`add_platform` 还要传已发布的 `version`。通过静态校验后返回 `submission_id` 和带一次性 `ticket` 的 PUT 地址。大文件不进工具参数 |
-| `finish_submit` | 参数：`submission_id`。应用核对校验和、扫密钥、请求外部依赖 URL。通过则状态变为 `pending`。只有地址当时打不开时仍是 `uploading`，带 `DEP_EXTERNAL_UNREACHABLE`，可以再调一次。其他失败为 `rejected` 并带规则 id，不进入审核队列 |
-| `begin_revise` | 参数：`submission_id`、清单、制品字节数。只对待审核或已退回的提交；静态校验通过后返回带一次性 `ticket` 的 PUT 地址。修订不新开提交，保持同一个 `submission_id` |
+| `begin_submit` | 参数：`submit_kind`（`new_version` 或 `add_platform`）、清单、制品字节数 `byte_size`（纯远程无文件 MCP 传 `0`）。通过静态校验后返回 `submission_id` 和免 KEY 一次性上传凭据（`put_url` 以及请求头模式的 `upload_url` + `upload_headers`）。大文件不进工具参数 |
+| `finish_submit` | 参数：`submission_id`。应用核对校验和、扫密钥、按 `QILIN_URL_CHECK` 策略检查外部依赖 URL。通过则状态变为 `pending`。`strict` 下只有地址当时打不开时留在 `uploading`（带 `DEP_EXTERNAL_UNREACHABLE`，可重试）。其他失败为 `rejected` 并带规则 id，不进入审核队列 |
+| `begin_revise` | 参数：`submission_id`、清单、制品字节数。只对待审核或已退回的提交；静态校验通过后返回免 KEY 一次性上传凭据。修订不新开提交，保持同一个 `submission_id` |
 | `finish_revise` | 参数：`submission_id`。核对修订制品并按原单替换；通过回到 `pending`，不通过回到 `rejected` |
 | `list_my_submissions` | 自己的提交和状态、退回原因 |
 | `get_submission` | 自己的某一条，含校验报告 |
-| `withdraw` | 撤回仍为 `pending` 的提交 |
+| `withdraw` | 撤回或取消仍为 `uploading`、`pending` 或 `rejected` 的提交，并回收关联的临时上传包与票据 |
+| `list_product_reports` | 查看自己命名空间下产品收到的问题反馈列表与按状态/类别的聚合统计 |
 
 `reviewer`（审核）与 `admin`（管理员）：
 
 | 工具 | 作用 |
 |---|---|
 | `list_reviews` | 参数：`status`，默认 `pending` |
-| `get_review` | 清单、校验报告、zip 文件清单（不是整个压缩包内容） |
+| `get_review` | 清单、校验报告、zip 文件清单与相对上一已发布版的归档差异（不是整个压缩包内容） |
 | `review_plugin` | 参数：`submission_id`、`checklist`（逐项为 true）。审核/管理员可用；不能审自己提交的插件。记录审核人与制品 sha256；`approve` 插件前必须有这条记录。 |
 | `approve` | `new_version` 变为一个新的已发布版本；`add_platform` 只给该版本加上这个平台。已有平台的文件不变 |
 | `reject` | 参数：`submission_id`、`reason`。作者能在 `list_my_submissions` 里看见原因 |
@@ -554,6 +577,8 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | `transfer_namespace` | 仅管理员：把命名空间转给另一个作者。只改所有者记录，不改写历史提交与审计 |
 | `list_contributions` | 贡献排行/明细。审核/管理员可用；不传 `account_id` 返回排行，传则返回该账号的已发布产品明细 |
 | `list_audit` | 读审计记录。按 id 倒序，可按包与动作过滤；只读 |
+| `list_reports` | 查看全站消费者问题分诊队列，支持按产品、品类、问题类别与状态过滤 |
+| `triage_report` | 推进反馈单状态（`open` → `triaged` → `resolved` / `rejected`），结单或驳回时必填 `resolution` 结论 |
 
 `runtime` 的上传和审核用同一组工具，不另做一套。规范也走 `get_spec`，不另做工具。
 
@@ -567,6 +592,7 @@ Tier A 允许 `publisher` 提交，Tier B 只接受 admin/白名单作者，Tier
 | `qilin://spec/mcp` | 第 4.3 节 |
 | `qilin://spec/mcp+skill` | 第 4.5 节 |
 | `qilin://spec/runtime` | 第 4.6 节 |
+| `qilin://spec/knowledge-intake` | 第 4.9.1 节 |
 
 知识包另有六条数据资源，与上面的散文规范分开：
 
@@ -678,7 +704,7 @@ PUT 地址一次性、短时有效、只能写这一份制品；URL 里的 `tick
 ## 8. 如何注册 MCP
 
 1. `kind=mcp` 或 `mcp+skill`。
-2. 写清 `transport` 和连接。内部地址可以使用内网 https；上传时的可达性检查从商店服务器发起，内网地址必须在商店服务器上打得开，否则 `DEP_EXTERNAL_UNREACHABLE` 同类的连接检查失败（规则 `MCP_URL_UNREACHABLE`，只对 http 传输做 HEAD）。
+2. 写清 `transport` 和连接。内部地址可以使用内网 https；上传时的可达性检查从商店服务器发起，默认只允许公网，内网地址必须先由部署方加进 `QILIN_FETCH_ALLOW_HOSTS`，否则 `DEP_EXTERNAL_UNREACHABLE` 同类的连接检查失败（规则 `MCP_URL_UNREACHABLE`，只对 http 传输做 HEAD）。
 3. `invoke` 至少列出工具名和一句话，或明确 `form=list_tools` 且审核时管理端能连上并看到工具（`approve` 前可选跑一次列出工具，失败则不允许发布，规则 `MCP_LIST_FAILED`）。v1 把这次连接检查放在 `approve`，不放在作者上传：作者上传时服务器未必持有该 MCP 的业务密钥。
 4. 业务密钥放在 `secrets`，不要放进 `url` 的查询串。`url` 带 `key=`、`token=` 直接 `SECRET_PATTERN`。
 5. `clients` 按传输方式填写，并满足第 4.2 节的能力表。
@@ -701,9 +727,10 @@ v1 一个进程、一个 SQLite、一个本地制品目录。不要先上数据�
 - `catalog_index`：package_id 主键、version、kind、title、summary、description、clients、platforms、manifest_json、updated_at。每个包只放最新可见版本；发布与下架时增量维护，启动时重建。`search` 走这张表，不再解析全部清单。
 - `catalog_fts`：FTS5 trigram 虚表（package_id、title、summary、description），与 `catalog_index` 同步维护。3 个字符以上的查询走 `MATCH`，短词回退 `LIKE`；SQLite 没编 FTS5 时整体回退 `LIKE`。
 - `client_caps`：client_id、caps（JSON 数组）
+- `reports`：id、package_id、version、category、status（`open` | `triaged` | `resolved` | `rejected`）、summary、steps、client、platform、contact、reporter_id、resolution、triaged_by、created_at、updated_at。存已发布版本收到的问题反馈与分诊结论
 - `audit`：actor、action、package_id、version、channel、at。只写不改；admin 用 `list_audit` 读，按 id 倒序，可按包与动作过滤
 
-制品路径按 sha256 存放，提交记录指向它。发布不复制文件。
+制品路径在数据库中统一存为相对于 `blob_dir` 的逻辑键（如 `releases/<id>/<version>.zip`、`release_assets/<id>/<version>/<platform>`），运行时按当前 `--blobs` 目录解析，不绑定宿主机或容器工作目录；旧库里的历史路径在启动迁移时自动归一化。
 
 ---
 
@@ -841,10 +868,10 @@ MCP 工具是这些操作的薄封装，校验函数只有一份，CLI、HTTP、
 
 实现和改造时以这张表为错误码，不另起一套中文句子当机器判断。
 
-`SPEC_VERSION` `SPEC_UNKNOWN` `KIND` `SEMVER` `AUTHOR_MISMATCH` `TITLE` `SUMMARY` `DESCRIPTION`  
+`SPEC_VERSION` `SPEC_UNKNOWN` `KIND` `KIND_NO_ARTIFACT` `SEMVER` `AUTHOR_MISMATCH` `TITLE` `SUMMARY` `DESCRIPTION`  
 `CLIENT_UNKNOWN` `CLIENT_CAPABILITY` `CLIENT_MISMATCH`  
 `PLATFORM_UNKNOWN` `PLATFORM_MIXED` `PLATFORM_TOO_BROAD` `PLATFORM_MISMATCH` `PLATFORM_TAKEN` `PLATFORM_SCOPE`  
-`VERSION_UNAVAILABLE` `VERSION_REQUIRED`  
+`VERSION_UNAVAILABLE` `VERSION_REQUIRED` `RESOURCE_NOT_FOUND` `ARTIFACT_MISSING` `SUBMISSION_STATE_INVALID`  
 `MCP_TRANSPORT` `MCP_CONNECT` `MCP_INVOKE` `MCP_URL_UNREACHABLE` `MCP_LIST_FAILED`  
 `SKILL_ENTRY_MISSING` `SKILL_INVOKE` `PLATFORM_FILE_MISSING`  
 `NOTE_ENTRY` `NOTE_LINK` `NOTE_FRONTMATTER` `NOTE_FILE` `NOTE_SECURITY` `NOTE_ORPHAN` `KNOWLEDGE_SCOPE` `KNOWLEDGE_TAXONOMY` `KNOWLEDGE_MAP`  
@@ -852,11 +879,11 @@ MCP 工具是这些操作的薄封装，校验函数只有一份，CLI、HTTP、
 `DEP_GUIDE_MISSING` `DEP_EXTERNAL_URL` `DEP_EXTERNAL_UNREACHABLE` `DEP_RESOURCE_GAP`  
 `RATE_LIMITED` `PLUGIN_MANIFEST` `PLUGIN_ENTRY` `PLUGIN_SCRIPT` `PLUGIN_DEPENDENCY` `PLUGIN_CAPABILITY` `PLUGIN_DSH_VERSION` `PLUGIN_ARTIFACT` `PLUGIN_TIER` `PLUGIN_REVIEW_REQUIRED` `SELF_REVIEW`  
 `DEP_STORE_UNPUBLISHED` `DEP_CYCLE` `RUNTIME_ASSET`  
-`VERSION_IMMUTABLE` `ROLE_FORBIDDEN` `IDENTITY_INVALID` `IDENTITY_UNCONFIGURED`  
-`USERNAME_INVALID` `USERNAME_TAKEN` `NAME_INVALID` `KEY_INVALID` `KEY_MISMATCH` `KEY_TAKEN` `PASSWORD_INVALID` `PASSWORD_MISMATCH` `ACCOUNT_DISABLED` `LAST_ADMIN`  
-`FRONTMATTER_CONFLICT` `ID_FORMAT`
+`VERSION_IMMUTABLE` `AUTH_REQUIRED` `ROLE_FORBIDDEN` `IDENTITY_INVALID` `IDENTITY_UNCONFIGURED`  
+`USERNAME_INVALID` `USERNAME_TAKEN` `NAME_INVALID` `KEY_INVALID` `KEY_MISMATCH` `KEY_TAKEN` `PASSWORD_INVALID` `PASSWORD_MISMATCH` `ACCOUNT_DISABLED` `LAST_ADMIN` `REGISTRATION_CLOSED` `PAYLOAD_TOO_LARGE` `UNSUPPORTED_MEDIA_TYPE`  
+`REPORT_INVALID` `REPORT_STATE_INVALID` `FRONTMATTER_CONFLICT` `ID_FORMAT`
 
-所有规则都是 error 级；没有「表外警告 + 人工确认」这一档。`ID_FORMAT` 只检查 `id` 是不是小写的 `命名空间.名字`，不检查它在不在任何名单里。
+除 `NOTE_ORPHAN`、`FRONTMATTER_CONFLICT` 中摘要非题头子串的提示，以及内网降级策略下的 `DEP_EXTERNAL_UNREACHABLE` 为 warning 级外，其余校验规则均为 error 级。`ID_FORMAT` 只检查 `id` 是不是小写的 `命名空间.名字`，不检查它在不在任何名单里。
 
 `KEY_MISMATCH`、`MCP_LIST_FAILED`、`MCP_URL_UNREACHABLE` 为 v1 预留，当前代码尚未产出。`KEY_MISMATCH` 用来表示「同一账号在两处凭据不一致」这类需要人工核对的场景；后两者按第 4.3 节第 2、3 条放在 `approve` 阶段做连接检查，v1 尚未实现，保留 id 以免后续新增时再改一次码表。
 
@@ -922,7 +949,7 @@ MCP 工具是这些操作的薄封装，校验函数只有一份，CLI、HTTP、
 | frontmatter | 上架单 | 冲突时 |
 |---|---|---|
 | `name` | `title` 可不同；`id` 由清单决定，不按目录名套 | `name` 改了也不改已发布 `id` |
-| `description` | `summary` 必须是同一作用的缩短，不得改成另一件事 | 拒收 |
+| `description` | `summary` 建议取同一作用的原句或子串，不要写成完全无关的另一件事 | 记 warning 提示（不阻断） |
 | `version` 能解析为 semver | `version` 必须相同 | 拒收 |
 | `version` 是说明文字 | 商店版本从 `1.0.0` 起，`changes` 写明原文字 | 不拒，但 `changes` 必填 |
 | `dependency` / `allowed-tools` | 必须出现在 `depends` 或 `clients` 的说明里 | 漏了拒收 |
@@ -1000,7 +1027,7 @@ Python 依赖不进商店镜像。写法固定为 `depends.external`：`detect` 
 
 九个主区：
 
-1. **货架**。导语：「货架陈列已经发布的技能、MCP、知识包与插件。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。」说明：「本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。」先是搜索、排序和分类（全部、技能、MCP、技能与 MCP、知识包、插件），再是在架数量；每页 12 条，可加载更多。卡片用完整的一句话说明；下面是产品 id、平台、AI 工具和作者。点进详情用 `list_versions`，由人选定版本再看 `describe`。运行时不进默认货架。
+1. **货架**。导语：「货架陈列已经发布的技能、MCP、知识包与插件。运行时、依赖工具请前往 运行时 菜单。下载使用请选择适合的版本。」说明：「本商店的产品下载不需要登录。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。」先是搜索、排序和分类（全部、技能、MCP、技能与 MCP、知识包、插件），再是在架数量；每页 12 条，可加载更多。卡片用完整的一句话说明；下面是产品 id、平台、AI 工具和作者。点进详情用 `list_versions`，由人选定版本再看 `describe`。运行时不进默认货架。
 2. **详情**。标题下先是一句话和整段说明，再是七组上架单。调用、依赖、密钥名写成句子，不把 JSON 倒在页面上。版本表的「适用平台」是作者写进这一版的；`any` 显示为「任意平台」。知识包另列一组：分类三段、入口、密级、范围、词表、语言与许可、生产溯源、本地主题。表下面的「装到这台电脑」不是创建时保存的，只为生成安装说明。适用 `any` 时，这里才列出六种具体电脑，并写明第一项不是产品数据。主按钮只有一个：「安装说明」展示 `install_plan` 的步骤，不在门户里执行安装。
 3. **用户**。未登录时这一页只注册。登录是顶栏弹出的登录框：用户名和口令两个输入，不列出已有的人，也不公开账号名单。登录后这一页只剩资料和修改口令，两块分开。注册成功会换成新会话，所以已登录时不再显示注册。没有「把密钥发给某人」的按钮。
 4. **用户管理**。单独一页，只给管理员。未登录、作者、审核只看到不能管理。管理员看到名单，可以改角色、停用、给别人重置口令，也可以把某个命名空间转给另一个作者。新口令随机生成，只显示一次。不能重置自己的，不能看见原来的口令或 KEY。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import sqlite3
 from pathlib import Path
 from functools import cmp_to_key
 
+from store.diagnostics import storage_warning
 from store.errors import StoreError
 from store.roles import REVIEW_ROLES
 from store.plan import PlanError, install_plan, resolve
@@ -46,7 +48,7 @@ class CatalogMixin:
         admin = self._require(token, REVIEW_ROLES)
         row = self._submission(submission_id)
         if row["status"] != "pending":
-            raise StoreError("VERSION_UNAVAILABLE", "只能审核待审核的插件")
+            raise StoreError("SUBMISSION_STATE_INVALID", "只能审核待审核的插件")
         manifest = json.loads(row["manifest_json"])
         if manifest.get("kind") != "plugin":
             raise StoreError("PLUGIN_REVIEW_REQUIRED", "只有插件需要审核清单")
@@ -96,32 +98,35 @@ class CatalogMixin:
         namespace_owner = self._namespace_owner(namespace)
         if namespace_owner is not None and namespace_owner != row["publisher_id"]:
             raise StoreError("ROLE_FORBIDDEN", f"命名空间 {namespace} 已经由别的发布者使用")
+        # 制品必须真的在盘上、且与提交时的校验和一致：发布一个"有路径没文件"
+        # 或内容被换过的版本，用户下载时才会 503/拿到坏包（评审 P2-5）。
+        # 纯连接无随包文件的 kind=mcp 允许 artifact 为 None。
+        artifact = self._verify_artifact(row, manifest)
         try:
             if row["submit_kind"] == "add_platform":
                 self._merge_platform(row)
             elif self._release_exists(row["package_id"], row["version"]):
                 raise StoreError("VERSION_IMMUTABLE", "该版本已发布")
             else:
-                release_artifact = row["artifact_path"]
-                if release_artifact and Path(release_artifact).is_file():
-                    dest = self.blob_dir / "releases" / row["package_id"] / f"{row['version']}.zip"
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    if Path(release_artifact).resolve() != dest.resolve():
-                        dest.unlink(missing_ok=True)
-                        try:
-                            os.link(release_artifact, dest)
-                        except OSError:
-                            shutil.copy2(release_artifact, dest)
-                    release_artifact = str(dest)
+                release_artifact = self._archive_release(row, artifact) if artifact is not None else None
+                # ON CONFLICT：同一个版本号可能是"下架后重新提交"。重新发布
+                # 会把 published_at 刷新、unpublished_at 清空（评审 P2-6）。
                 self._db.execute(
                     """
                     INSERT INTO releases
                       (package_id, version, manifest_json, artifact_path, artifact_sha256)
                     VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(package_id, version) DO UPDATE SET
+                      manifest_json = excluded.manifest_json,
+                      artifact_path = excluded.artifact_path,
+                      artifact_sha256 = excluded.artifact_sha256,
+                      published_at = CURRENT_TIMESTAMP,
+                      unpublished_at = NULL,
+                      unpublish_reason = NULL
                     """,
                     (
                         row["package_id"], row["version"], row["manifest_json"],
-                        release_artifact, row["artifact_sha256"],
+                        release_artifact, row["artifact_sha256"] if release_artifact else None,
                     ),
                 )
                 self._publish_assets(row["id"], row["package_id"], row["version"])
@@ -134,13 +139,47 @@ class CatalogMixin:
                 """,
                 (admin.id, submission_id),
             )
+            # 发布、货架索引、审计在同一个事务里：任何一步失败都整体回滚，
+            # 不会出现"已发布但货架搜不到"或"发布了却没有审计"（评审 P2-2）。
+            self._refresh_catalog_index(row["package_id"])
+            self._audit(admin.id, "approve", row["package_id"], row["version"], commit=False)
             self._db.commit()
         except Exception:
             self._db.rollback()
             raise
-        self._refresh_catalog_index(row["package_id"])
-        self._db.commit()
-        self._audit(admin.id, "approve", row["package_id"], row["version"])
+
+    def _verify_artifact(self, row: sqlite3.Row, manifest: dict | None = None) -> Path | None:
+        """发布前核对制品：文件在、校验和与提交记录一致；纯连接无制品 MCP 返回 None。"""
+        path = row["artifact_path"]
+        if not path:
+            parsed = manifest if manifest is not None else json.loads(row["manifest_json"])
+            if parsed.get("kind") == "mcp":
+                return None
+            raise StoreError("CHECKSUM", "这条提交没有制品，不能发布")
+        archive = self.resolve_blob_path(str(path))
+        if archive is None or not archive.is_file():
+            raise StoreError("CHECKSUM", "制品不在磁盘上，不能发布")
+        expected = str(row["artifact_sha256"] or "")
+        if expected:
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            if digest != expected:
+                raise StoreError("CHECKSUM", "制品校验和与提交记录不一致，不能发布")
+        return archive
+
+    def _archive_release(self, row: sqlite3.Row, artifact: Path) -> str:
+        """把提交件收进 releases/<id>/<version>.zip，返回相对 blob_dir 的逻辑键。"""
+        dest = self.blob_dir / "releases" / row["package_id"] / f"{row['version']}.zip"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if artifact.resolve() != dest.resolve():
+            dest.unlink(missing_ok=True)
+            try:
+                os.link(artifact, dest)
+            except OSError:
+                # 复制到 .part 再替换：中途失败不会留下半截归档。
+                temp = dest.with_name(dest.name + ".part")
+                shutil.copy2(artifact, temp)
+                temp.replace(dest)
+        return self.to_blob_key(dest)
     def reject(self, token: str, submission_id: str, reason: str) -> None:
         with self._lock:
             self._reject(token, submission_id, reason)
@@ -176,7 +215,7 @@ class CatalogMixin:
             ).fetchone()
             if row is None:
                 raise StoreError("VERSION_UNAVAILABLE", "没有这个已发布版本")
-            advance("published", "unpublish", RELEASE, "这个版本不能下架")
+            advance("published", "unpublish", RELEASE, "这个版本不能下架", rule="VERSION_UNAVAILABLE")
             self._db.execute(
                 """
                 UPDATE releases
@@ -215,16 +254,21 @@ class CatalogMixin:
         offset: int = 0,
         sort: str = "updated",
     ) -> dict:
-        """分页的货架查询，走 `catalog_index`，不再解析全量清单。"""
+        """分页的货架查询，走 `catalog_index`，不再解析全量清单。
+
+        响应里的 `limit` 回的是**实际生效**的上限（夹到 500），不是调用方原值；
+        旧实现原样回显，客户端据此翻页会和服务端语义对不上。
+        """
         with self._read():
             start = max(0, int(offset))
+            size = None if limit is None else min(max(0, int(limit)), 500)
             result = self._search(
-                query, kind=kind, client=client, platform=platform, limit=limit, offset=start, sort=sort,
+                query, kind=kind, client=client, platform=platform, limit=size, offset=start, sort=sort,
             )
             return {
                 "items": result["items"],
                 "total": result["total"],
-                "limit": limit,
+                "limit": size,
                 "offset": start,
             }
 
@@ -560,12 +604,16 @@ class CatalogMixin:
             row = self._submission(submission_id)
             names: list[str] = []
             current_texts: dict[str, str] = {}
-            if row["artifact_path"] and Path(row["artifact_path"]).is_file():
-                names, current_texts = _read_archive_preview(Path(row["artifact_path"]))
+            current_archive = self.resolve_blob_path(row["artifact_path"]) if row["artifact_path"] else None
+            if current_archive is not None and current_archive.is_file():
+                names, current_texts = _read_archive_preview(current_archive)
             base_texts: dict[str, str] = {}
             base_row = self._diff_base_row(row["package_id"], row["version"], row["submit_kind"])
-            if base_row is not None and base_row["artifact_path"] and Path(base_row["artifact_path"]).is_file():
-                _, base_texts = _read_archive_preview(Path(base_row["artifact_path"]))
+            if base_row is not None and base_row["artifact_path"]:
+                base_fallback = f"releases/{row['package_id']}/{base_row['version']}.zip"
+                base_archive = self.resolve_blob_path(base_row["artifact_path"], fallback_rel=base_fallback)
+                if base_archive is not None and base_archive.is_file():
+                    _, base_texts = _read_archive_preview(base_archive)
             sheet = self._sheet(row)
             review = self._db.execute(
                 "SELECT checklist_json, reviewer_id, created_at FROM plugin_reviews WHERE submission_id = ?",
@@ -647,16 +695,34 @@ class CatalogMixin:
                 )
             except PlanError as exc:
                 raise StoreError(exc.rule, exc.message) from exc
-    def artifact(self, package_id: str, version: str, platform: str | None = None) -> tuple[bytes, str]:
+    def artifact_file(
+        self, package_id: str, version: str, platform: str | None = None,
+    ) -> tuple[Path, str]:
+        """制品文件路径 + sha256。下载走流式，不再把 32MiB 整块读进内存。"""
         with self._read():
             row = self._visible_release(package_id, version)
             if row is None:
                 raise StoreError("VERSION_UNAVAILABLE", "没有这个已发布版本")
             manifest = json.loads(row["manifest_json"])
-            if manifest.get("kind") in {"skill", "mcp+skill", "knowledge", "plugin"}:
-                return _read_artifact(row["artifact_path"]), row["artifact_sha256"]
-            if manifest.get("kind") != "runtime":
-                raise StoreError("VERSION_UNAVAILABLE", "这个产品没有可下载的制品")
+            kind = manifest.get("kind")
+            if kind in {"skill", "mcp+skill", "knowledge", "plugin"}:
+                fallback = f"releases/{package_id}/{version}.zip"
+                resolved = self.resolve_blob_path(row["artifact_path"], fallback_rel=fallback)
+                if resolved is None:
+                    storage_warning(f"artifact path unresolved: {package_id}@{version}")
+                    raise StoreError("ARTIFACT_MISSING", "制品文件不可读")
+                return resolved, str(row["artifact_sha256"] or "")
+            if kind == "mcp":
+                if not row["artifact_path"] or not row["artifact_sha256"]:
+                    raise StoreError("KIND_NO_ARTIFACT", "这个产品没有可下载的制品")
+                fallback = f"releases/{package_id}/{version}.zip"
+                resolved = self.resolve_blob_path(row["artifact_path"], fallback_rel=fallback)
+                if resolved is None:
+                    storage_warning(f"artifact path unresolved: {package_id}@{version}")
+                    raise StoreError("ARTIFACT_MISSING", "制品文件不可读")
+                return resolved, str(row["artifact_sha256"])
+            if kind != "runtime":
+                raise StoreError("KIND_NO_ARTIFACT", "这个产品没有可下载的制品")
             if not platform:
                 raise StoreError("PLATFORM_MISMATCH", "下载 runtime 必须指定平台")
             asset = self._db.execute(
@@ -668,20 +734,39 @@ class CatalogMixin:
             ).fetchone()
             if asset is None:
                 raise StoreError("PLATFORM_MISMATCH", f"没有平台 {platform} 的制品")
-            return _read_artifact(asset["path"]), asset["sha256"]
+            resolved = self.resolve_blob_path(asset["path"])
+            if resolved is None:
+                storage_warning(f"runtime asset unresolved: {package_id}@{version} ({platform})")
+                raise StoreError("ARTIFACT_MISSING", "制品文件不可读")
+            return resolved, str(asset["sha256"])
+
+    def artifact(self, package_id: str, version: str, platform: str | None = None) -> tuple[bytes, str]:
+        """整块读出制品并校验摘要。给测试与内部调用；HTTP 下载走 `artifact_file`。"""
+        path, digest = self.artifact_file(package_id, version, platform)
+        try:
+            body = path.read_bytes()
+        except OSError as exc:
+            storage_warning(f"artifact missing on disk: {package_id}@{version} ({platform or 'zip'})")
+            raise StoreError("ARTIFACT_MISSING", "制品文件不可读") from exc
+        if digest and hashlib.sha256(body).hexdigest() != digest:
+            storage_warning(f"artifact checksum mismatch: {package_id}@{version}")
+            raise StoreError("ARTIFACT_MISSING", "制品校验和异常，暂不可下载")
+        return body, digest
+
     def _publish_assets(self, submission_id: str, package_id: str, version: str) -> None:
         rows = self._db.execute(
             "SELECT platform, sha256, path FROM submission_assets WHERE submission_id = ?",
             (submission_id,),
         ).fetchall()
         for row in rows:
+            key = self.to_blob_key(row["path"])
             self._db.execute(
                 """
                 INSERT OR REPLACE INTO release_assets
                   (package_id, version, platform, sha256, path)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (package_id, version, row["platform"], row["sha256"], row["path"]),
+                (package_id, version, row["platform"], row["sha256"], key),
             )
     def _merge_platform(self, row: sqlite3.Row) -> None:
         current = self._visible_release(row["package_id"], row["version"])
@@ -770,8 +855,13 @@ class CatalogMixin:
             (package_id, version),
         ).fetchone()
     def _release_exists(self, package_id: str, version: str) -> bool:
+        """只看**在架**的版本。
+
+        下架过的版本允许重新提交同一版本号：误下架不必靠升版本才能恢复
+        （评审 P2-6）。重新发布走 `_approve` 的 upsert，会清掉 unpublished_at。
+        """
         row = self._db.execute(
-            "SELECT 1 FROM releases WHERE package_id = ? AND version = ?",
+            "SELECT 1 FROM releases WHERE package_id = ? AND version = ? AND unpublished_at IS NULL",
             (package_id, version),
         ).fetchone()
         return row is not None

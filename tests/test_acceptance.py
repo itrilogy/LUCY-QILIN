@@ -18,6 +18,7 @@ from store.http_api import serve
 from store.installer import run as run_installer
 from store.mcp_api import handle
 from store.service import Store
+from tests.test_service import bootstrap_admin
 from store.submit_client import submit_directory
 from tests.test_service import SKILL, skill_manifest
 
@@ -31,9 +32,7 @@ class AcceptanceTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.store = Store(self.root / "store.db", self.root / "blobs")
         self.addCleanup(self.store.close)
-        _profile, _session, self.admin_key = self.store.register_account(
-            "root.admin", "管理员", "管理员", "IT", "管理员", PASSWORD,
-        )
+        _admin_profile, self.admin_key = bootstrap_admin(self.store)
         _profile, _session, self.publisher_key = self.store.register_account(
             "author.one", "顾木", "木青", "产品", "作者", PASSWORD,
         )

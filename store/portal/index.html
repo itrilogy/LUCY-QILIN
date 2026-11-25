@@ -4,6 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>栖林 · 智能体集市</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="icon" href="/design/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/design/apple-touch-icon.png" />
+  <link rel="mask-icon" href="/design/favicon.svg" color="#0D5E42" />
+  <meta name="theme-color" content="#0D5E42" />
   <link rel="stylesheet" href="/design/tokens.css" />
   <link rel="stylesheet" href="/portal/styles.css" />
 </head>
@@ -51,8 +56,8 @@
           </div>
           <p class="lead" id="identity-hint">货架陈列已经发布的技能、MCP、知识包与插件。运行时、依赖工具请前往 运行时 菜单。</p>
           <details class="notice">
-            <summary>登录下载与 MCP 连接说明</summary>
-            <p class="foot" id="identity-note">本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。</p>
+            <summary>下载与 MCP 连接说明</summary>
+            <p class="foot" id="identity-note">本商店的产品下载不需要登录。如用 AI 工具进行相关产品的浏览、下载、使用，请在 AI 工具中连接本商店提供的 MCP 服务，使用说明请查看 连接 菜单。</p>
           </details>
           <div class="market">
             <input id="query" placeholder="搜名称、一句话或产品 id" aria-label="搜索货架" />
@@ -95,7 +100,7 @@
               <thead><tr><th>版本</th><th>变更</th><th>适用平台</th><th>AI 工具</th></tr></thead>
               <tbody id="version-rows"></tbody>
             </table>
-            <p class="foot" id="plan-note">上表为作者声明的适用平台。下方选择本机平台，只用于生成安装说明，不改产品本身。页面下载须先登录。</p>
+            <p class="foot" id="plan-note">上表为作者声明的适用平台。下方选择本机平台，只用于生成安装说明，不改产品本身。制品下载不需要登录。</p>
             <div class="choices">
               <div class="choice">
                 <label for="plan-version">选定版本</label>
@@ -133,8 +138,9 @@
           <div id="users-out">
           <h1 id="create-title">注册</h1>
           <p class="lead">本菜单只办理注册。登录请使用顶栏登录框，填写用户名和口令，不从名单中选择。</p>
+          <p class="state" id="reg-closed" role="status"></p>
           <div class="group" id="create-panel">
-              <p class="foot" id="create-hint">第一位是审核，之后是作者。标了必填的都要填。口令按下面的规则。创建后到「连接」复制商店 MCP 的配置。</p>
+              <p class="foot" id="create-hint">注册后是作者，可提交与修订自己的产品；审核、管理员由管理员在「用户管理」里授予。标了必填的都要填，创建后到「连接」复制商店 MCP 的配置。</p>
               <label for="reg-username">用户名 <abbr class="req">必填</abbr></label>
               <input id="reg-username" autocomplete="username" placeholder="小写字母开头" aria-required="true" />
               <label for="reg-real-name">姓名 <abbr class="req">必填</abbr></label>
@@ -205,15 +211,33 @@
 
         <section id="admin-users" class="view">
           <h1>用户管理</h1>
-          <p class="lead">审核可在本菜单修改角色、停用账号，并为他人重置口令。新口令由商店随机生成，只显示一次。不能重置自己的口令，也不能查看原口令或 KEY。</p>
-          <p class="state" id="admin-gate">先用审核的口令登录。</p>
+          <p class="lead">管理员可在本菜单修改角色、停用账号，并为他人重置口令。新口令由商店随机生成，只显示一次。不能重置自己的口令，也不能查看原口令或 KEY。</p>
+          <p class="state" id="admin-gate">先用管理员的口令登录。</p>
           <div class="group hidden" id="admin-board">
             <div class="group hidden" id="reset-once">
-              <h2>新口令</h2>
+              <h2>只显示一次的口令</h2>
               <p class="foot" id="reset-note"></p>
               <pre id="reset-secret" class="diff"></pre>
               <div class="row"><button type="button" class="btn" id="copy-reset">复制口令</button></div>
               <p class="state" id="reset-copy-state"></p>
+            </div>
+            <div class="group">
+              <h2>新建用户</h2>
+              <p class="foot">管理员直接开号：口令由商店随机生成、只显示一次，创建后把用户名与口令当面交给对方。角色也可以创建后在名单里改。</p>
+              <label for="new-user-username">用户名</label>
+              <input id="new-user-username" placeholder="小写字母开头，3 到 32 位" />
+              <label for="new-user-real-name">姓名</label>
+              <input id="new-user-real-name" />
+              <label for="new-user-nickname">昵称</label>
+              <input id="new-user-nickname" />
+              <label for="new-user-role">角色</label>
+              <select id="new-user-role">
+                <option value="publisher">作者</option>
+                <option value="reviewer">审核</option>
+                <option value="admin">管理员</option>
+              </select>
+              <div class="row"><button type="button" class="btn" id="new-user-submit">创建用户</button></div>
+              <p class="state" id="new-user-state"></p>
             </div>
             <table class="responsive-cards">
               <thead><tr><th>昵称</th><th>姓名</th><th>部门</th><th>岗位</th><th>用户名</th><th>角色</th><th></th></tr></thead>
@@ -526,7 +550,7 @@
   </dialog>
   <dialog id="plan-drawer" aria-labelledby="plan-heading">
     <h2 id="plan-heading">安装说明</h2>
-    <p class="lead">步骤只供查阅，不在本页执行。未登录不能在页面下载。</p>
+    <p class="lead">步骤只供查阅，不在本页执行。制品下载不需要登录。</p>
     <div id="plan-steps" class="plan-steps"></div>
     <details class="plan-raw">
       <summary>查看原始安装计划 JSON（供 store install 使用）</summary>
@@ -538,4 +562,5 @@
     </div>
     <p class="state" id="plan-copy-state" role="status" aria-live="polite"></p>
   </dialog>
+  <script src="/portal/manifest_merge.js"></script>
   <script src="/portal/app.js"></script>

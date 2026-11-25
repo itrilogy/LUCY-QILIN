@@ -16,6 +16,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     const state = { role: "anonymous", userId: "", mode: "new", submissionId: null, base: null, packageId: null, kind: "skill", shelfKind: "", shelfSort: "updated", shelfOffset: 0, shelfTotal: 0, issued: null, connectTab: "dsh-read", profile: null, contribAccount: "" };
 
     function show(id) {
+      // 未知路由不能让所有视图都关掉：退回货架，而不是给一张白页。
+      if (id && !document.getElementById(id)) id = "shelf";
       document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === id));
       if (id !== "detail") saveHash("#" + id);
       document.querySelectorAll(".nav button").forEach((button) => {
@@ -77,6 +79,18 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         const error = new Error(body.message || "请求失败");
         error.rule = body.rule || "";
         error.status = response.status;
+        if ((response.status === 401 || response.status === 403) && !String(path).startsWith("/v1/me")) {
+          // 401 = 没登录/凭据失效，403 = 登录了但角色不够。401 直接把界面退回
+          // 未登录并重开登录框；403 只刷新一次身份（兼容老服务端把两者混在一起的
+          // 情况），确认匿名才重开登录。
+          Promise.resolve().then(async () => {
+            try { await refreshWho(); } catch { /* 身份刷新失败就保持原错误 */ }
+            if (response.status === 401 || state.role === "anonymous") {
+              openLogin();
+              setState("login-state", "登录已过期，请重新登录。", true);
+            }
+          });
+        }
         throw error;
       }
       return body;
@@ -164,9 +178,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     }
 
     async function loadIdentity() {
+      let info = null;
       try {
-        const info = await api("/v1/identity");
-        if (info.mode !== "hub" || !info.login) return;
+        info = await api("/v1/identity");
+      } catch { /* 静态说明仍可用 */ }
+      applyRegistration(info);
+      try {
+        if (!info || info.mode !== "hub" || !info.login) return;
         const note = document.getElementById("identity-note");
         if (note.dataset.hub) return;
         note.dataset.hub = "1";
@@ -178,6 +196,56 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         }
       } catch { /* 静态说明仍可用 */ }
     }
+
+    // 注册开关与"有没有管理员"都由服务端给，不在前端猜。
+    // 空库时 HTTP 注册一律拒绝：第一个管理员只能由 `store init-admin` 建。
+    function applyRegistration(info) {
+      const panel = document.getElementById("create-panel");
+      const closed = document.getElementById("reg-closed");
+      if (!panel || !closed) return;
+      if (info && info.has_admin === false) {
+        panel.classList.add("hidden");
+        closed.textContent = "商店还没有管理员。请在服务器上执行 store init-admin，然后刷新本页。";
+        return;
+      }
+      if (info && info.registration === "closed") {
+        panel.classList.add("hidden");
+        closed.textContent = "本店暂不开放自助注册，请联系管理员开通账号。";
+        return;
+      }
+      panel.classList.remove("hidden");
+      closed.textContent = "";
+    }
+
+    document.getElementById("new-user-submit").addEventListener("click", async () => {
+      const username = document.getElementById("new-user-username").value.trim();
+      const realName = document.getElementById("new-user-real-name").value.trim();
+      const nickname = document.getElementById("new-user-nickname").value.trim();
+      const role = document.getElementById("new-user-role").value;
+      if (!username || !realName || !nickname) {
+        setState("new-user-state", "用户名、姓名、昵称都要填。", true);
+        return;
+      }
+      try {
+        const issued = await api("/v1/accounts", {
+          method: "POST",
+          body: JSON.stringify({ username, real_name: realName, nickname, role }),
+        });
+        const panel = document.getElementById("reset-once");
+        panel.classList.remove("hidden");
+        document.getElementById("reset-note").textContent =
+          "已创建 " + (issued.nickname || issued.username) + "（" + issued.username + "）。初始口令只出现这一次，离开这一页后不再显示。";
+        document.getElementById("reset-secret").textContent = issued.password;
+        setState("reset-copy-state", "", false);
+        document.getElementById("new-user-username").value = "";
+        document.getElementById("new-user-real-name").value = "";
+        document.getElementById("new-user-nickname").value = "";
+        setState("new-user-state", "已创建。请把用户名和口令当面交给对方。", false);
+        await loadManage();
+      } catch (error) {
+        setState("new-user-state", error.message, true);
+      }
+    });
 
     document.getElementById("login-open").addEventListener("click", () => openLogin());
     // 交给浏览器整页跳转：state 由商店在同一个响应里写进 Cookie，
@@ -218,7 +286,13 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     }
 
     function applyHash() {
-      const raw = decodeURIComponent(location.hash.slice(1));
+      let raw = "";
+      try {
+        raw = decodeURIComponent(location.hash.slice(1));
+      } catch {
+        // 畸形百分号编码（例如 #detail/%E0%A4%A）：退回货架，不要让整页卡住。
+        raw = "";
+      }
       if (!raw) { show("shelf"); return; }
       const [path, query] = raw.split("?");
       if (path.startsWith("detail/")) {
@@ -467,8 +541,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       const choices = broad ? CONCRETE : declared;
       choices.forEach((item) => platforms.append(new Option(item, item)));
       document.getElementById("plan-note").textContent = broad
-        ? "上表「任意平台」为作者写入这一版的适用平台。下方选择本机平台，只用于生成安装说明，不改产品。列表第一项不是创建时保存的数据。页面下载须先登录。"
-        : "下方只列出这一版已经发布的平台。请选择要安装的电脑。此选择不改这一版的适用平台。页面下载须先登录。";
+        ? "上表「任意平台」为作者写入这一版的适用平台。下方选择本机平台，只用于生成安装说明，不改产品。列表第一项不是创建时保存的数据。制品下载不需要登录。"
+        : "下方只列出这一版已经发布的平台。请选择要安装的电脑。此选择不改这一版的适用平台。制品下载不需要登录。";
     }
 
     function platformList(list) {
@@ -704,7 +778,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
       setState("plan-copy-state", "", false);
       document.getElementById("plan-drawer").showModal();
       if (!signedIn()) {
-        stepsBox.replaceChildren(text("p", "请先登录。本商店的产品，均需要登录后，才能在页面进行下载。如用 AI 工具浏览、下载、使用，请查看 连接 菜单。", "state"));
+        stepsBox.replaceChildren(text("p", "请先登录后再生成安装说明。制品下载不需要登录；如用 AI 工具浏览、下载、使用，请查看 连接 菜单。", "state"));
         body.textContent = "";
         return;
       }
@@ -844,7 +918,7 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     }
 
     function lines(items) {
-      return (items || []).map((item) => `${item.id} ${item.version || item.version_range || "*"}`).join("\n");
+      return QilinMerge.formatDepLines(items);
     }
 
     function syncKind() {
@@ -1099,10 +1173,8 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
     }
 
     function depLines(value) {
-      return value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-        const [id, version] = line.split(/\s+/, 2);
-        return { id, version: version || "*" };
-      });
+      // 只在第一个空白处切，保住 ">=1.5 <2" 这种带空格的版本范围。
+      return QilinMerge.parseDepLines(value);
     }
 
     async function manifestFromForm() {
@@ -1232,7 +1304,17 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
           files[path] = await b64(buf);
         }
       }
-      return { manifest, files };
+      // 修订 / 新版本：表单表达不了的内容（第 2 条外部依赖、带空格的版本范围、
+      // 其它平台资源地址、knowledge 的分类等）从原清单带过来，别静默丢掉。
+      const merged = state.mode === "new" || !state.base
+        ? manifest
+        : QilinMerge.mergeRevised(manifest, state.base, {
+            name: extName,
+            version_range: document.getElementById("f-ext-range").value.trim(),
+            detect: document.getElementById("f-ext-detect").value.trim(),
+            url: document.getElementById("f-ext-url").value.trim(),
+          });
+      return { manifest: merged, files };
     }
 
     function bytesToBase64(bytes) {
@@ -2187,5 +2269,23 @@ const CONCRETE = ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64", 
         setState("manage-state", error.message, true);
       }
     }
+
+    // 浏览器前进/后退与手改地址栏都要重新应用路由；以前只监听首次加载。
+    window.addEventListener("hashchange", () => applyHash());
+
+    // 输入框里按回车就提交：登录框与注册面板都不是 <form>，以前只能点按钮。
+    function submitOnEnter(containerId, buttonId) {
+      const box = document.getElementById(containerId);
+      const button = document.getElementById(buttonId);
+      if (!box || !button) return;
+      box.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        if (event.target && event.target.tagName === "TEXTAREA") return;
+        event.preventDefault();
+        button.click();
+      });
+    }
+    submitOnEnter("login-box", "login-submit");
+    submitOnEnter("create-panel", "reg-submit");
 
     refreshWho().then(() => { loadIdentity(); applyHash(); });

@@ -5,14 +5,27 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import sqlite3
 from typing import Any
 from urllib.parse import quote
 
+from store.diagnostics import storage_warning
 from store.protocol import ALL_DATA_URIS, NAMES, blurb, data_blurb, data_mime, data_text, name_from_uri, text, uri
 from store.service import Store, StoreError
 
-PROTOCOL_VERSIONS = ("2025-03-26", "2025-06-18", "2024-11-05")
-PUBLIC = ("get_spec", "search", "list_versions", "resolve", "describe", "install_plan", "artifact")
+PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+PUBLIC = (
+    "get_spec",
+    "search",
+    "list_versions",
+    "resolve",
+    "describe",
+    "install_plan",
+    "artifact",
+    "report_problem",
+    "get_report",
+)
+AUTHENTICATED = ("list_my_reports",)
 PUBLISHER = (
     "validate",
     "begin_submit",
@@ -23,16 +36,25 @@ PUBLISHER = (
     "list_my_submissions",
     "get_submission",
     "withdraw",
+    "list_product_reports",
 )
 REVIEWER = (
-    "list_reviews", "get_review", "review_plugin", "approve", "reject",
-    "unpublish", "list_audit", "list_contributions",
+    "list_reviews",
+    "get_review",
+    "review_plugin",
+    "approve",
+    "reject",
+    "unpublish",
+    "list_audit",
+    "list_contributions",
+    "list_reports",
+    "triage_report",
 )
 ADMIN = ("transfer_namespace",)
 
 _SCHEMAS: dict[str, dict] = {
     "get_spec": {
-        "description": "读取商店下发的上架规范全文。打包之前先调这个。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime、plugin。规范不在技能正文或 references 里，不要去那里找上架步骤。返回的 text 与校验器是同一套，不要另造规则。",
+        "description": "读取商店下发的上架规范全文。打包之前先调这个。name 取 upload、knowledge、skill、mcp、mcp+skill、runtime、plugin；知识包下载后的本地入库约定取 knowledge-intake。规范不在技能正文或 references 里，不要去那里找上架步骤。返回的 text 与校验器是同一套，不要另造规则。",
         "properties": {
             "name": {
                 "type": "string",
@@ -82,7 +104,7 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["id", "version"],
     },
     "install_plan": {
-        "description": "生成给本机安装器的步骤。商店不执行这些步骤。version 必须是精确号，先 resolve 或 list_versions。平台不在该版本里则失败，不生成步骤。",
+        "description": "生成给本机安装器的步骤。商店不执行这些步骤。version 必须是精确号，先 resolve 或 list_versions。平台不在该版本里则失败，不生成步骤。知识包的计划另带 post_install（knowledge_intake）；按本机是否有知识包管理插件决定是否调用，见 qilin://spec/knowledge-intake。",
         "properties": {
             "id": {"type": "string"},
             "version": {"type": "string", "description": "精确版本号，不能省略。"},
@@ -92,23 +114,93 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["id", "version", "client", "platform"],
     },
     "artifact": {
-        "description": "已发布制品的下载地址和 sha256。不返回文件正文。技能包是一份 zip，platform 可省略。地址给安装器下载，不要把正文塞进对话。",
+        "description": "已发布制品的下载地址和 sha256。不返回文件正文。技能包、知识包、插件与含脚本的 stdio MCP 是一份 zip，platform 可省略；纯远程无文件 MCP 返回 KIND_NO_ARTIFACT。地址给安装器下载，不要把正文塞进对话。",
         "properties": {
             "id": {"type": "string"},
             "version": {"type": "string", "description": "精确版本号。"},
-            "platform": {"type": "string", "description": "runtime 按平台取文件。技能包可省略。"},
+            "platform": {"type": "string", "description": "runtime 按平台取文件。zip 类制品可省略。"},
         },
         "required": ["id", "version"],
     },
+    "report_problem": {
+        "description": "向商店提交一条已发布产品版本的使用或安装问题反馈。匿名与已登录用户均可调用；返回 report_id 供后续查询处理进度。请勿在描述中粘贴真实密钥。",
+        "properties": {
+            "id": {"type": "string", "description": "产品 id。"},
+            "version": {"type": "string", "description": "精确版本号。"},
+            "category": {
+                "type": "string",
+                "description": "问题类别：install_failed、artifact_missing、doc_mismatch、runtime_error 或 other。",
+            },
+            "summary": {"type": "string", "description": "问题现象与错误码摘要，最多 2000 字。"},
+            "steps": {"type": "string", "description": "可选。复现步骤与关键输出，最多 4000 字。"},
+            "client": {"type": "string", "description": "可选。复现时的 AI 工具名，例如 antigravity。"},
+            "platform": {"type": "string", "description": "可选。操作系统与架构，例如 darwin-arm64。"},
+            "contact": {"type": "string", "description": "可选。回访联系方式（公开列表中不展示）。"},
+        },
+        "required": ["id", "version", "category", "summary"],
+    },
+    "get_report": {
+        "description": "按 report_id 查询一条问题反馈的当前状态（open / triaged / resolved / rejected）与处理结论。",
+        "properties": {
+            "report_id": {"type": "string", "description": "report_problem 返回的反馈单号。"},
+        },
+        "required": ["report_id"],
+    },
+    "list_my_reports": {
+        "description": "列出当前登录账号提交过的问题反馈与处理进展。",
+        "properties": {
+            "limit": {"type": "integer", "description": "最多返回几条，默认 100，上限 500。"},
+            "offset": {"type": "integer", "description": "跳过前几条，默认 0。"},
+        },
+    },
+    "list_product_reports": {
+        "description": "作者查看自己命名空间下产品收到的问题反馈列表与状态/类别统计。",
+        "properties": {
+            "id": {"type": "string", "description": "可选。只看指定产品 id。"},
+            "version": {"type": "string", "description": "可选。只看指定版本。"},
+            "category": {"type": "string", "description": "可选。按类别过滤。"},
+            "status": {"type": "string", "description": "可选。按 open、triaged、resolved、rejected 过滤。"},
+            "limit": {"type": "integer", "description": "默认 100，上限 500。"},
+            "offset": {"type": "integer", "description": "默认 0。"},
+        },
+    },
+    "list_reports": {
+        "description": "审核/管理员查看全站消费者问题分诊队列，支持按产品、品类、问题类别与状态过滤。",
+        "properties": {
+            "id": {"type": "string", "description": "可选。按产品 id 过滤。"},
+            "kind": {"type": "string", "description": "可选。按产品 kind 过滤。"},
+            "category": {"type": "string", "description": "可选。按问题类别过滤。"},
+            "status": {"type": "string", "description": "可选。按状态过滤。"},
+            "limit": {"type": "integer", "description": "默认 100，上限 500。"},
+            "offset": {"type": "integer", "description": "默认 0。"},
+        },
+    },
+    "triage_report": {
+        "description": "审核/管理员推进反馈单状态（open → triaged → resolved / rejected），结单或驳回时必填 resolution 结论。",
+        "properties": {
+            "report_id": {"type": "string"},
+            "status": {"type": "string", "description": "triaged、resolved 或 rejected。"},
+            "resolution": {"type": "string", "description": "处理结论或修复版本号；resolved / rejected 时必填。"},
+        },
+        "required": ["report_id", "status"],
+    },
     "validate": {
-        "description": "只校验清单，不入库。打包前先 get_spec 取规范，再调这个。返回 ok 和 findings（rule、path、message、severity）。还有 severity 为 error 的就按 path 和 message 改包，再调一次。ok 为 false 时不要 begin_submit。",
+        "description": "上传前校验，不入库。打包前先 get_spec 取规范，再调这个。只传 manifest 做清单级静态校验；同时传 files（相对路径到 base64）或 skill_md（SKILL.md 原文）可在上传前做全量跨文件预检（含 SKILL.md frontmatter、入口文件、绑定脚本与密钥扫描）。返回 ok、scope、rules 和 findings（rule、path、message、severity）。还有 severity 为 error 的就按 path 和 message 改包，再调一次。ok 为 false 时不要 begin_submit。",
         "properties": {
             "manifest": {"type": "object", "description": "manifest.json 的对象。也可以是它的 JSON 文本。"},
+            "files": {
+                "type": "object",
+                "description": "可选。相对路径到 base64 内容的映射，用于在上传前执行完整包文件预检。",
+            },
+            "skill_md": {
+                "type": "string",
+                "description": "可选。SKILL.md 的 UTF-8 原文，便于在不传完整文件树时预检 frontmatter 与清单一致性。",
+            },
         },
         "required": ["manifest"],
     },
     "submit_package": {
-        "description": "小包直接走 MCP 提交：传清单和 base64 文件树，服务端校验、打包、入库，不需要 CLI 或单独终端 PUT。单次文件合计上限 8MiB；更大的包用 begin_submit 拿 ticket put_url。",
+        "description": "小包直接走 MCP 提交：传清单和 base64 文件树，服务端校验、打包、入库，不需要 CLI 或单独终端 PUT。单次文件合计上限 8MiB；更大的包用 begin_submit 拿一次性上传地址。",
         "properties": {
             "manifest": {"type": "object", "description": "manifest.json 的对象或 JSON 文本。"},
             "files": {
@@ -120,20 +212,20 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["manifest", "files"],
     },
     "begin_submit": {
-        "description": "静态校验通过后开始一次提交，返回 submission_id 和一次性 put_url。submit_kind 为 new_version 或 add_platform。大文件不进参数，只传 byte_size。校验还有错误时不要调。由安装器对 put_url 做 PUT，不要自己编上传命令。",
+        "description": "静态校验通过后开始一次提交，返回 submission_id 和免 KEY 的一次性上传凭据（put_url，或 upload_url + upload_headers）。submit_kind 为 new_version 或 add_platform。大文件不进参数，只传 byte_size（纯远程无文件 MCP 传 0，无需 PUT 直接调 finish_submit）。校验还有错误时不要调。优先用 upload_url 配合 X-Upload-Ticket 请求头（或直接对 put_url）发送二进制 PUT，不要在命令里附带 QILIN_STORE_KEY。",
         "properties": {
             "manifest": {"type": "object"},
             "submit_kind": {"type": "string", "description": "new_version 或 add_platform。add_platform 只给 runtime。"},
-            "byte_size": {"type": "integer", "description": "zip 的字节数。"},
+            "byte_size": {"type": "integer", "description": "zip 的字节数；纯远程无文件 MCP 填 0。"},
         },
         "required": ["manifest", "byte_size"],
     },
     "begin_revise": {
-        "description": "修订一条待审核或已退回的提交。和 begin_submit 一样分三段：先校验清单，拿一次性 put_url，PUT 制品，再 finish_revise。修订保持同一个 submission_id，不新开一条让审核员对不上。",
+        "description": "修订一条待审核或已退回的提交。和 begin_submit 一样分三段：先校验清单，拿免 KEY 一次性上传凭据（put_url 或 upload_url + upload_headers），PUT 制品，再 finish_revise。修订保持同一个 submission_id，不新开一条让审核员对不上。",
         "properties": {
             "submission_id": {"type": "string"},
             "manifest": {"type": "object"},
-            "byte_size": {"type": "integer", "description": "zip 的字节数。"},
+            "byte_size": {"type": "integer", "description": "zip 的字节数；纯远程无文件 MCP 填 0。"},
         },
         "required": ["submission_id", "manifest", "byte_size"],
     },
@@ -143,7 +235,7 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["submission_id"],
     },
     "finish_submit": {
-        "description": "核对已经 PUT 的制品。通过则 pending，进入审核。只有外部地址当时打不开才留在 uploading，规则 DEP_EXTERNAL_UNREACHABLE，可以再调一次。其他失败为 rejected，并带规则。把状态原样告诉用户。",
+        "description": "核对已经 PUT 的制品。通过则 pending，进入审核。只有外部地址在 strict 模式下当时打不开才留在 uploading（规则 DEP_EXTERNAL_UNREACHABLE，可以再调一次）。其他失败为 rejected，并带规则。把状态原样告诉用户。",
         "properties": {"submission_id": {"type": "string"}},
         "required": ["submission_id"],
     },
@@ -157,7 +249,7 @@ _SCHEMAS: dict[str, dict] = {
         "required": ["submission_id"],
     },
     "withdraw": {
-        "description": "撤回仍为 pending 的提交。已发布的版本用 unpublish，不能用这个。",
+        "description": "撤回或取消仍为 uploading、pending 或 rejected 的提交并回收临时上传包。已发布的版本用 unpublish，不能用这个。",
         "properties": {"submission_id": {"type": "string"}},
         "required": ["submission_id"],
     },
@@ -233,26 +325,27 @@ _SHELF = (
     "看有什么：search 给出已发布产品的名称、摘要和当前最高版本。"
     "要看一份产品能做什么，用 describe，version 必须是精确号。"
     "安装前先 list_versions 或 resolve 选定版本，再 install_plan。"
-    "install_plan 只返回步骤，交给用户本机的安装器执行。artifact 只返回下载地址和 sha256。"
+    "install_plan 只返回步骤，交给用户本机的安装器执行。知识包的计划另带 post_install：如果本机有知识包管理插件/技能，按 qilin://spec/knowledge-intake 调用 knowledge_intake 完成入库；没有就保持目录形态。artifact 只返回下载地址和 sha256。"
     "连接用的 KEY 已经在客户端配置里，不要当成工具参数，也不要写进结果。"
 )
 _PACKAGE = (
-    "要上架时：先 get_spec 取对应种类的规范，在本地整理目录，再 validate。"
+    "要上架时：先 get_spec 取对应种类的规范，在本地整理目录，再 validate（推荐同时传 files 或 skill_md 做跨文件预检）。"
     "ok 为 false，或 findings 里还有 severity 为 error 的，就按 path 和 message 改包，再 validate。"
     "不要在还有错误时 begin_submit。"
-    "ok 为 true 之后，小包可直接用 submit_package 传清单和 base64 文件树；大包用 begin_submit 拿 ticket put_url，PUT 后再 finish_submit。"
-    "不要再手动调一遍，以免交成两条。不要自己编上传命令，不要把密钥文件或密钥值打进包。"
+    "ok 为 true 之后，8MiB 以内小包可直接用 submit_package 传清单和 base64 文件树；大包用 begin_submit 拿免 KEY 一次性上传凭据（upload_url + upload_headers 或 put_url），二进制 PUT 后再 finish_submit。"
+    "不要重复调用 begin_submit 以免交成两条；半途放弃可调 withdraw 回收 uploading 记录。不要把密钥文件或密钥值打进包或命令行。"
     "把 pending、uploading 或规则原样告诉用户。"
     "退回原因在 list_my_submissions 和 get_submission 里。"
 )
 _REVIEW = (
     "审核只做发布、退回或下架，不改清单字段。"
     "list_reviews 看队列，get_review 看提交，approve 发布，reject 要写下作者能看见的原因，unpublish 下架已发布版本。"
+    "list_reports 看消费者问题反馈队列，triage_report 推进分诊并填写结论。"
     "内容不对就退回，让作者改包再传。"
 )
 
 
-def handle(store: Store, token: str, message: Any, *, base_url: str) -> dict | None:
+def handle(store: Store, token: str, message: Any, *, base_url: str, source_ip: str = "") -> dict | None:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or "method" not in message:
         return _error(None, -32600, "请求不是 JSON-RPC")
     method = message["method"]
@@ -316,22 +409,57 @@ def handle(store: Store, token: str, message: Any, *, base_url: str) -> dict | N
         name = params.get("name")
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         if name not in _SCHEMAS:
-            return _fail(request_id, "VERSION_UNAVAILABLE", "没有这个工具")
+            return _fail(request_id, "RESOURCE_NOT_FOUND", "没有这个工具")
         if name not in _visible(role):
             return _fail(request_id, "ROLE_FORBIDDEN", "密钥无权做这件事")
         try:
-            payload = _call(store, token, name, arguments, base_url)
+            payload = _call(store, token, name, arguments, base_url, source_ip=source_ip)
         except StoreError as exc:
             return _fail(request_id, exc.rule, exc.message)
         except json.JSONDecodeError:
             return _fail(request_id, "SPEC_VERSION", "manifest 不是合法 JSON")
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, AttributeError, sqlite3.ProgrammingError):
+            # 参数类型不对是调用方的问题，要回 JSON-RPC 错误，不能变成 HTTP 500。
             return _fail(request_id, "SPEC_VERSION", "工具参数不完整")
         return _ok(request_id, _content(payload, False))
     return _error(request_id, -32601, "没有这个方法")
 
 
-def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -> dict:
+def _decode_inline_files(raw_files: Any) -> dict[str, bytes]:
+    if not isinstance(raw_files, dict):
+        raise StoreError("CHECKSUM", "files 必须是对象")
+    files: dict[str, bytes] = {}
+    total = 0
+    for raw_name, encoded in raw_files.items():
+        if not isinstance(raw_name, str) or not isinstance(encoded, str):
+            raise StoreError("CHECKSUM", "files 必须是路径到 base64 文本的映射")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise StoreError("CHECKSUM", f"{raw_name} 不是合法 base64") from exc
+        total += len(content)
+        if total > 8 * 1024 * 1024:
+            raise StoreError("CHECKSUM", "inline 文件合计超过 8MiB，请改用 begin_submit")
+        files[raw_name] = content
+    return files
+
+
+def _attach_upload_urls(started: dict, base_url: str) -> dict:
+    root = base_url.rstrip("/")
+    if started.get("put_path"):
+        started["put_url"] = root + started["put_path"]
+    elif "put_path" in started:
+        started["put_url"] = None
+    if started.get("upload_path") and started.get("upload_ticket"):
+        started["upload_url"] = root + started["upload_path"]
+        started["upload_headers"] = {"X-Upload-Ticket": started["upload_ticket"]}
+    started.pop("put_path", None)
+    started.pop("upload_path", None)
+    started.pop("upload_ticket", None)
+    return started
+
+
+def _call(store: Store, token: str, name: str, arguments: dict, base_url: str, *, source_ip: str = "") -> dict:
     if name == "get_spec":
         spec_name = str(arguments.get("name") or "")
         body = text(spec_name)
@@ -371,37 +499,90 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
             base_url=base_url,
         )
     if name == "artifact":
-        _body, digest = store.artifact(
+        path, digest = store.artifact_file(
             arguments["id"], arguments["version"], arguments.get("platform"),
         )
+        if not path.is_file():
+            storage_warning(f"artifact missing on disk: {arguments['id']}@{arguments['version']}")
+            raise StoreError("ARTIFACT_MISSING", "制品文件不可读")
         return {"url": _artifact_url(base_url, arguments), "sha256": digest}
+    if name == "report_problem":
+        return store.report_problem(
+            token,
+            arguments["id"],
+            arguments["version"],
+            category=arguments["category"],
+            summary=arguments["summary"],
+            steps=arguments.get("steps") or "",
+            client=arguments.get("client") or "",
+            platform=arguments.get("platform") or "",
+            contact=arguments.get("contact") or "",
+            source_ip=source_ip,
+            channel="mcp",
+        )
+    if name == "get_report":
+        return store.get_report(token, arguments["report_id"])
+    if name == "list_my_reports":
+        return store.list_my_reports(
+            token,
+            limit=int(arguments.get("limit") or 100),
+            offset=int(arguments.get("offset") or 0),
+        )
+    if name == "list_product_reports":
+        return store.list_product_reports(
+            token,
+            package_id=arguments.get("id") or None,
+            version=arguments.get("version") or None,
+            category=arguments.get("category") or None,
+            status=arguments.get("status") or None,
+            limit=int(arguments.get("limit") or 100),
+            offset=int(arguments.get("offset") or 0),
+        )
+    if name == "list_reports":
+        return store.list_reports(
+            token,
+            package_id=arguments.get("id") or None,
+            kind=arguments.get("kind") or None,
+            category=arguments.get("category") or None,
+            status=arguments.get("status") or None,
+            limit=int(arguments.get("limit") or 100),
+            offset=int(arguments.get("offset") or 0),
+        )
+    if name == "triage_report":
+        return store.triage_report(
+            token,
+            arguments["report_id"],
+            status=arguments["status"],
+            resolution=arguments.get("resolution") or "",
+            channel="mcp",
+        )
     if name == "validate":
         manifest = arguments["manifest"]
         if isinstance(manifest, str):
             manifest = json.loads(manifest)
-        findings = store.explain_manifest(token, manifest)
+        has_files = arguments.get("files") is not None
+        has_skill_md = arguments.get("skill_md") is not None
+        inline_files: dict[str, bytes] | None = None
+        if has_files or has_skill_md:
+            inline_files = _decode_inline_files(arguments["files"]) if has_files else {}
+            if has_skill_md:
+                raw_skill_md = arguments["skill_md"]
+                if not isinstance(raw_skill_md, str):
+                    raise StoreError("CHECKSUM", "skill_md 必须是字符串")
+                inline_files.setdefault("SKILL.md", raw_skill_md.encode("utf-8"))
+        findings = store.explain_manifest(token, manifest, files=inline_files)
         rules = [item["rule"] for item in findings if item["severity"] == "error"]
-        return {"ok": not rules, "rules": rules, "findings": findings}
+        return {
+            "ok": not rules,
+            "scope": "package" if inline_files is not None else "manifest_only",
+            "rules": rules,
+            "findings": findings,
+        }
     if name == "submit_package":
         manifest = arguments["manifest"]
         if isinstance(manifest, str):
             manifest = json.loads(manifest)
-        raw_files = arguments.get("files") or {}
-        if not isinstance(raw_files, dict):
-            raise StoreError("CHECKSUM", "files 必须是对象")
-        files: dict[str, bytes] = {}
-        total = 0
-        for raw_name, encoded in raw_files.items():
-            if not isinstance(raw_name, str) or not isinstance(encoded, str):
-                raise StoreError("CHECKSUM", "files 必须是路径到 base64 文本的映射")
-            try:
-                content = base64.b64decode(encoded, validate=True)
-            except (ValueError, binascii.Error) as exc:
-                raise StoreError("CHECKSUM", f"{raw_name} 不是合法 base64") from exc
-            total += len(content)
-            if total > 8 * 1024 * 1024:
-                raise StoreError("CHECKSUM", "inline 文件合计超过 8MiB，请改用 begin_submit")
-            files[raw_name] = content
+        files = _decode_inline_files(arguments.get("files") or {})
         result = store.submit(
             token, manifest, files,
             submit_kind=str(arguments.get("submit_kind") or "new_version"),
@@ -418,10 +599,7 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
             submit_kind=str(arguments.get("submit_kind") or "new_version"),
             byte_size=int(arguments["byte_size"]),
         )
-        if started["put_path"]:
-            started["put_url"] = base_url.rstrip("/") + started["put_path"]
-        started.pop("put_path", None)
-        return started
+        return _attach_upload_urls(started, base_url)
     if name == "finish_submit":
         result = store.finish_submit(token, arguments["submission_id"])
         return {"submission_id": result.submission_id, "status": result.status, "rules": result.rules}
@@ -435,10 +613,7 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
             manifest,
             byte_size=int(arguments["byte_size"]),
         )
-        if started["put_path"]:
-            started["put_url"] = base_url.rstrip("/") + started["put_path"]
-        started.pop("put_path", None)
-        return started
+        return _attach_upload_urls(started, base_url)
     if name == "finish_revise":
         result = store.finish_revise(token, arguments["submission_id"])
         return {"submission_id": result.submission_id, "status": result.status, "rules": result.rules}
@@ -483,24 +658,28 @@ def _call(store: Store, token: str, name: str, arguments: dict, base_url: str) -
     if name == "unpublish":
         store.unpublish(token, arguments["id"], arguments["version"], str(arguments.get("reason") or ""))
         return {"status": "unpublished"}
-    raise StoreError("VERSION_UNAVAILABLE", "没有这个工具")
+    raise StoreError("RESOURCE_NOT_FOUND", "没有这个工具")
 
 
 def _instructions(role: str | None) -> str:
     if role == "admin":
         return _SHELF + _PACKAGE + _REVIEW
+    if role == "reviewer":
+        return _SHELF + _PACKAGE + _REVIEW
     if role == "publisher":
         return _SHELF + _PACKAGE + "这把 KEY 不能审核。"
-    return _SHELF + "上架和审核需要门户里作者或审核的 KEY。匿名可以看已发布的，也可以读取规范。"
+    return _SHELF + "上架和审核需要门户里作者或审核的 KEY。匿名可以看已发布的、读取规范，也可以用 report_problem 反馈问题。"
 
 
 def _visible(role: str | None) -> tuple[str, ...]:
     if role == "admin":
-        return PUBLIC + PUBLISHER + REVIEWER + ADMIN
+        return PUBLIC + AUTHENTICATED + PUBLISHER + REVIEWER + ADMIN
     if role == "reviewer":
-        return PUBLIC + PUBLISHER + REVIEWER
+        return PUBLIC + AUTHENTICATED + PUBLISHER + REVIEWER
     if role == "publisher":
-        return PUBLIC + PUBLISHER
+        return PUBLIC + AUTHENTICATED + PUBLISHER
+    if role == "member":
+        return PUBLIC + AUTHENTICATED
     return PUBLIC
 
 

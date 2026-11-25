@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="栖林 QiLin">
+  <rect width="48" height="48" rx="12" fill="#0D5E42"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.8">
+    <path d="M24 9 12.5 24h23L24 9Z" stroke="#F5F7FA"/>
+    <path d="M24 18 15.5 31.5h17L24 18Z" stroke="#F1C40F"/>
+  </g>
+  <rect x="10" y="39" width="28" height="3" rx="1.5" fill="#00D2FF" opacity="0.9"/>
+</svg>

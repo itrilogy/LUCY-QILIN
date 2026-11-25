@@ -1,0 +1,49 @@
+# 构建上下文只保留运行所需：store/ + pyproject.toml + deploy/docker 的脚本。
+# 数据、测试、文档、VCS 全部排除，镜像层里不会有本机库与账号。
+
+# 运行期数据（真实账号、会话、制品）
+var/
+data/
+backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 版本库与 CI
+.git/
+.gitignore
+.github/
+
+# Python 环境与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+*.whl
+
+# 测试、脚本、文档不进运行镜像
+tests/
+scripts/
+docs/
+*.md
+LICENSE
+
+# 密钥
+.env
+.env.*
+deploy/docker/secrets/
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+
+# 本地工具链
+uv.lock
